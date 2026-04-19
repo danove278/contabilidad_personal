@@ -7,6 +7,7 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
 - **Formulario web responsivo** (mobile-first) para registrar movimientos desde cualquier dispositivo con conexión a internet
 - **Google Sheets como base de datos**: toda la visualización, análisis y reportes se hacen directamente en la hoja de cálculo
 - **Organización por mes**: cada registro se guarda automáticamente en una hoja separada con el nombre del mes (ej: "Marzo 2026", "Abril 2026")
+- **Hoja Dashboard** con resumen automático: totales del mes, balance y desglose por subcategoría (mes / anual / total histórico)
 - **Autenticación Google**: solo usuarios con cuenta Google pueden acceder
 - **5 categorías con subcategorías predefinidas**:
   - Ingresos: Salario, Freelance, Inversiones, Otros
@@ -32,6 +33,29 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
 | `Index.html` | Frontend — formulario responsivo con HTML, CSS y JavaScript integrados |
 | `INSTRUCCIONES.md` | Guía paso a paso para desplegar el proyecto en Google Apps Script |
 
+## Cómo funciona
+
+**Tú NO escribes directamente en el Google Sheet.** Todos los registros los haces desde la **app web** (el formulario). Al registrar desde la app, los datos se guardan automáticamente en **dos lugares a la vez**:
+
+1. **Hoja del mes** (ej: "Marzo 2026") → para ver los registros organizados por mes
+2. **Hoja "Movimientos"** → donde se acumulan todos los registros (la usa el Dashboard internamente)
+
+El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/año.
+
+### Hojas del Google Sheet
+
+| Hoja | Para qué sirve | ¿La borro? |
+|------|----------------|------------|
+| Marzo 2026 (y otras por mes) | Ver registros de ese mes específico | **NO** — es tu vista por mes |
+| Movimientos | Base de datos completa (alimenta el Dashboard) | **NO** — la necesita el Dashboard |
+| Dashboard | Resumen visual con totales y desglose | **NO** — es tu vista principal |
+
+### Flujo completo
+
+1. Abres la app web → registras un gasto en el formulario
+2. Se guarda automáticamente en la hoja del mes correspondiente **Y** en "Movimientos"
+3. Abres el Dashboard → seleccionas mes → ves todos los totales y el detalle por subcategoría
+
 ## Campos registrados
 
 Cada movimiento guarda:
@@ -56,7 +80,10 @@ Pasos resumidos:
 2. Crear un proyecto en Google Apps Script
 3. Pegar el contenido de `Code.gs` e `Index.html`
 4. Reemplazar `SPREADSHEET_ID` con el ID real
-5. Desplegar como Web App con acceso "Cualquier persona con cuenta de Google"
+5. Ejecutar `configurarHoja` y luego `crearDashboard` desde el editor
+6. Desplegar como Web App con acceso "Cualquier persona con cuenta de Google"
+
+> Si ya tenías datos registrados antes de crear la hoja "Movimientos", ejecuta una vez la función `migrarAHojaMovimientos` para copiarlos automáticamente.
 
 ## Uso
 
@@ -64,10 +91,13 @@ Pasos resumidos:
 2. Inicia sesión con tu cuenta de Google
 3. Selecciona categoría, subcategoría y completa los campos
 4. Clic en "Registrar"
-5. Los datos se guardan automáticamente en la hoja del mes correspondiente en el Google Sheet
+5. Los datos se guardan automáticamente en la hoja del mes y en "Movimientos"
+6. Abre el Dashboard en el Google Sheet para ver el resumen
 
 Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chrome → "Agregar a pantalla de inicio").
 
-## Versión
+## Versiones
 
-**v1.0.0** — Primera versión estable con registro completo y organización por mes.
+- **v1.1.1** — Fix de error en `crearDashboard` y mejoras de documentación
+- **v1.1.0** — Hoja Dashboard con resumen por mes/año + hoja maestra "Movimientos" + migración de datos existentes
+- **v1.0.0** — Primera versión estable con registro completo y organización por mes

@@ -347,9 +347,6 @@ function crearDashboard() {
   // Congelar filas superiores
   dash.setFrozenRows(4);
 
-  // Ocultar cuadrícula para mejor apariencia
-  dash.hideGridlines();
-
   // Activar la hoja
   ss.setActiveSheet(dash);
 
