@@ -336,6 +336,183 @@
       display: block;
     }
 
+    /* Botón de configuración */
+    .header {
+      position: relative;
+    }
+
+    .settings-btn {
+      position: absolute;
+      top: 50%;
+      right: 16px;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,0.2);
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .settings-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      z-index: 2000;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--card);
+      border-radius: var(--radius);
+      max-width: 520px;
+      width: 100%;
+      margin: 20px 0;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    .modal-header {
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: white;
+      padding: 18px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h2 {
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 0 4px;
+    }
+
+    .modal-body {
+      padding: 20px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .config-category {
+      margin-bottom: 22px;
+    }
+
+    .config-category-title {
+      font-size: 14px;
+      font-weight: 700;
+      padding: 8px 12px;
+      border-radius: 8px;
+      color: white;
+      margin-bottom: 10px;
+    }
+
+    .config-subcat-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .config-subcat-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--bg);
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    .config-delete-btn {
+      background: none;
+      border: none;
+      color: var(--danger);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 2px 8px;
+      line-height: 1;
+      border-radius: 6px;
+    }
+
+    .config-delete-btn:hover {
+      background: rgba(231,76,60,0.1);
+    }
+
+    .config-add-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    .config-add-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .config-add-row input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .config-add-row button {
+      padding: 8px 16px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .config-add-row button:hover {
+      background: var(--primary-dark);
+    }
+
+    .config-add-row button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .config-empty {
+      color: var(--text-light);
+      font-size: 13px;
+      font-style: italic;
+      padding: 8px 12px;
+    }
+
     /* Responsive */
     @media (max-width: 400px) {
       .form-row {
@@ -350,6 +527,12 @@
         padding: 8px 14px;
         font-size: 13px;
       }
+
+      .settings-btn {
+        right: 12px;
+        width: 36px;
+        height: 36px;
+      }
     }
   </style>
 </head>
@@ -358,6 +541,20 @@
   <div class="header">
     <h1>Registro de Gastos</h1>
     <p>Registra tus movimientos financieros</p>
+    <button class="settings-btn" title="Configurar subcategorías" onclick="abrirConfig()">&#9881;</button>
+  </div>
+
+  <!-- Modal de configuración -->
+  <div class="modal-backdrop" id="modalConfig" onclick="cerrarConfigFondo(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Configurar subcategorías</h2>
+        <button class="modal-close" onclick="cerrarConfig()" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body" id="modalConfigBody">
+        <!-- Generado dinámicamente -->
+      </div>
+    </div>
   </div>
 
   <div class="container">
@@ -440,17 +637,59 @@
   <script>
     var categoriaSeleccionada = '';
 
-    // Subcategorías predefinidas por categoría
+    // Colores por categoría (para la UI de configuración)
+    var COLORES_CAT = {
+      'Ingresos': '#27ae60',
+      'Ahorro': '#2980b9',
+      'Deudas': '#e74c3c',
+      'Gastos Fijos': '#f39c12',
+      'Gastos Variables': '#e67e22'
+    };
+
+    var CATEGORIAS_ORDEN = ['Ingresos', 'Ahorro', 'Deudas', 'Gastos Fijos', 'Gastos Variables'];
+
+    // Subcategorías (se cargan desde el backend al iniciar)
     var subcategorias = {
-      'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
-      'Ahorro': ['Fondo emergencia', 'Inversión', 'Meta específica'],
-      'Deudas': ['Préstamo', 'Tarjeta crédito', 'Hipoteca'],
-      'Gastos Fijos': ['Alquiler', 'Servicios', 'Seguro', 'Suscripciones', 'Transporte'],
-      'Gastos Variables': ['Comida', 'Entretenimiento', 'Ropa', 'Salud', 'Educación']
+      'Ingresos': [],
+      'Ahorro': [],
+      'Deudas': [],
+      'Gastos Fijos': [],
+      'Gastos Variables': []
     };
 
     // Establecer fecha de hoy
     document.getElementById('fecha').valueAsDate = new Date();
+
+    /**
+     * Carga las subcategorías desde el backend
+     */
+    function cargarSubcategorias() {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        // Entorno sin Apps Script (preview local) - usar defaults
+        subcategorias = {
+          'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
+          'Ahorro': ['Fondo emergencia', 'Inversión', 'Meta específica'],
+          'Deudas': ['Préstamo', 'Tarjeta crédito', 'Hipoteca'],
+          'Gastos Fijos': ['Alquiler', 'Servicios', 'Seguro', 'Suscripciones', 'Transporte'],
+          'Gastos Variables': ['Comida', 'Entretenimiento', 'Ropa', 'Salud', 'Educación']
+        };
+        if (categoriaSeleccionada) actualizarSubcategorias(categoriaSeleccionada);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (data) subcategorias = data;
+          if (categoriaSeleccionada) actualizarSubcategorias(categoriaSeleccionada);
+        })
+        .withFailureHandler(function(err) {
+          console.error('Error cargando subcategorías:', err);
+        })
+        .obtenerSubcategorias();
+    }
+
+    // Cargar al iniciar
+    cargarSubcategorias();
 
     /**
      * Actualiza el dropdown de subcategorías según la categoría
@@ -645,6 +884,169 @@
         this.closest('.form-group').classList.remove('error');
       });
     });
+
+    /* ============================================================
+       MODAL DE CONFIGURACIÓN DE SUBCATEGORÍAS
+       ============================================================ */
+
+    function abrirConfig() {
+      renderizarConfig();
+      document.getElementById('modalConfig').classList.add('open');
+    }
+
+    function cerrarConfig() {
+      document.getElementById('modalConfig').classList.remove('open');
+      // Actualizar dropdown actual con los cambios
+      if (categoriaSeleccionada) {
+        actualizarSubcategorias(categoriaSeleccionada);
+      }
+    }
+
+    function cerrarConfigFondo(e) {
+      if (e.target.id === 'modalConfig') cerrarConfig();
+    }
+
+    /**
+     * Renderiza el contenido del modal con las subcategorías actuales
+     */
+    function renderizarConfig() {
+      var body = document.getElementById('modalConfigBody');
+      body.innerHTML = '';
+
+      CATEGORIAS_ORDEN.forEach(function(cat) {
+        var bloque = document.createElement('div');
+        bloque.className = 'config-category';
+
+        // Título de categoría
+        var titulo = document.createElement('div');
+        titulo.className = 'config-category-title';
+        titulo.style.background = COLORES_CAT[cat];
+        titulo.textContent = cat;
+        bloque.appendChild(titulo);
+
+        // Lista de subcategorías
+        var lista = document.createElement('div');
+        lista.className = 'config-subcat-list';
+        var subs = subcategorias[cat] || [];
+
+        if (subs.length === 0) {
+          var vacio = document.createElement('div');
+          vacio.className = 'config-empty';
+          vacio.textContent = 'Sin subcategorías';
+          lista.appendChild(vacio);
+        } else {
+          subs.forEach(function(sub) {
+            var item = document.createElement('div');
+            item.className = 'config-subcat-item';
+
+            var nombre = document.createElement('span');
+            nombre.textContent = sub;
+            item.appendChild(nombre);
+
+            var btn = document.createElement('button');
+            btn.className = 'config-delete-btn';
+            btn.innerHTML = '&times;';
+            btn.title = 'Eliminar';
+            btn.onclick = function() { eliminarSub(cat, sub); };
+            item.appendChild(btn);
+
+            lista.appendChild(item);
+          });
+        }
+        bloque.appendChild(lista);
+
+        // Fila para agregar nueva
+        var addRow = document.createElement('div');
+        addRow.className = 'config-add-row';
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Nueva subcategoría';
+        input.dataset.cat = cat;
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            agregarSub(cat, input);
+          }
+        });
+        addRow.appendChild(input);
+
+        var btnAdd = document.createElement('button');
+        btnAdd.textContent = 'Agregar';
+        btnAdd.onclick = function() { agregarSub(cat, input); };
+        addRow.appendChild(btnAdd);
+
+        bloque.appendChild(addRow);
+        body.appendChild(bloque);
+      });
+    }
+
+    function agregarSub(categoria, input) {
+      var valor = (input.value || '').trim();
+      if (!valor) {
+        input.focus();
+        return;
+      }
+
+      input.disabled = true;
+
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        // Preview local
+        if (!subcategorias[categoria].includes(valor)) {
+          subcategorias[categoria].push(valor);
+        }
+        input.value = '';
+        input.disabled = false;
+        renderizarConfig();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          input.disabled = false;
+          if (resp.success) {
+            subcategorias = resp.subcategorias || subcategorias;
+            input.value = '';
+            renderizarConfig();
+            showToast('Subcategoría agregada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          input.disabled = false;
+          showToast('Error: ' + err.message, 'error');
+        })
+        .agregarSubcategoria(categoria, valor);
+    }
+
+    function eliminarSub(categoria, subcategoria) {
+      if (!confirm('¿Eliminar "' + subcategoria + '" de ' + categoria + '?')) return;
+
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        // Preview local
+        subcategorias[categoria] = subcategorias[categoria].filter(function(s) {
+          return s !== subcategoria;
+        });
+        renderizarConfig();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            subcategorias = resp.subcategorias || subcategorias;
+            renderizarConfig();
+            showToast('Subcategoría eliminada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('Error: ' + err.message, 'error');
+        })
+        .eliminarSubcategoria(categoria, subcategoria);
+    }
   </script>
 
 </body>

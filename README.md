@@ -8,8 +8,9 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
 - **Google Sheets como base de datos**: toda la visualización, análisis y reportes se hacen directamente en la hoja de cálculo
 - **Organización por mes**: cada registro se guarda automáticamente en una hoja separada con el nombre del mes (ej: "Marzo 2026", "Abril 2026")
 - **Hoja Dashboard** con resumen automático: totales del mes, balance y desglose por subcategoría (mes / anual / total histórico)
+- **Gestión de subcategorías desde la app**: ícono ⚙️ en el header para agregar/eliminar subcategorías sin tocar código
 - **Autenticación Google**: solo usuarios con cuenta Google pueden acceder
-- **5 categorías con subcategorías predefinidas**:
+- **5 categorías con subcategorías editables** (valores iniciales por defecto):
   - Ingresos: Salario, Freelance, Inversiones, Otros
   - Ahorro: Fondo emergencia, Inversión, Meta específica
   - Deudas: Préstamo, Tarjeta crédito, Hipoteca
@@ -48,6 +49,7 @@ El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/a
 |------|----------------|------------|
 | Marzo 2026 (y otras por mes) | Ver registros de ese mes específico | **NO** — es tu vista por mes |
 | Movimientos | Base de datos completa (alimenta el Dashboard) | **NO** — la necesita el Dashboard |
+| Config | Subcategorías editables desde la app | **NO** — la usan la app y el Dashboard |
 | Dashboard | Resumen visual con totales y desglose | **NO** — es tu vista principal |
 
 ### Flujo completo
@@ -55,6 +57,18 @@ El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/a
 1. Abres la app web → registras un gasto en el formulario
 2. Se guarda automáticamente en la hoja del mes correspondiente **Y** en "Movimientos"
 3. Abres el Dashboard → seleccionas mes → ves todos los totales y el detalle por subcategoría
+
+### Gestionar subcategorías desde la app
+
+En el header de la app hay un ícono **⚙️ (engranaje)** que abre un modal para administrar subcategorías sin tocar código:
+
+- **Agregar**: escribe el nombre en el campo "Nueva subcategoría" y clic en "Agregar" (o Enter)
+- **Eliminar**: clic en el botón **✕** junto a cada subcategoría (pide confirmación)
+- Los cambios se guardan en la hoja **"Config"** del Google Sheet
+- El dropdown del formulario se actualiza automáticamente al cerrar el modal
+- Para que el **Dashboard** refleje los cambios, ejecuta nuevamente `crearDashboard` desde el editor de Apps Script
+
+Las subcategorías que elimines **no borran los registros históricos** — esos datos siguen existiendo en las hojas mensuales y en Movimientos.
 
 ## Campos registrados
 
@@ -98,6 +112,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.2.0** — Gestión de subcategorías desde la app (modal ⚙️) + hoja "Config" para almacenarlas dinámicamente
 - **v1.1.1** — Fix de error en `crearDashboard` y mejoras de documentación
 - **v1.1.0** — Hoja Dashboard con resumen por mes/año + hoja maestra "Movimientos" + migración de datos existentes
 - **v1.0.0** — Primera versión estable con registro completo y organización por mes

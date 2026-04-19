@@ -15,7 +15,10 @@ var HEADERS = [
   'Monto', 'Descripción', 'Método de Pago', 'Notas'
 ];
 
-var SUBCATEGORIAS = {
+var CATEGORIAS = ['Ingresos', 'Ahorro', 'Deudas', 'Gastos Fijos', 'Gastos Variables'];
+
+// Subcategorías POR DEFECTO (solo se usan la primera vez para inicializar la hoja Config)
+var SUBCATEGORIAS_DEFAULT = {
   'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
   'Ahorro': ['Fondo emergencia', 'Inversión', 'Meta específica'],
   'Deudas': ['Préstamo', 'Tarjeta crédito', 'Hipoteca'],
@@ -68,6 +71,117 @@ function obtenerHojaMovimientos(ss) {
     formatearHoja(sheet);
   }
   return sheet;
+}
+
+/**
+ * Obtiene o crea la hoja "Config" donde se guardan las subcategorías
+ */
+function obtenerHojaConfig(ss) {
+  var sheet = ss.getSheetByName('Config');
+  if (!sheet) {
+    sheet = ss.insertSheet('Config');
+    sheet.getRange(1, 1, 1, 2).setValues([['Categoría', 'Subcategoría']]);
+    var headerRange = sheet.getRange(1, 1, 1, 2);
+    headerRange.setFontWeight('bold').setBackground('#4a90d9').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 180);
+    sheet.setColumnWidth(2, 200);
+
+    // Poblar con los valores por defecto
+    var filas = [];
+    CATEGORIAS.forEach(function(cat) {
+      (SUBCATEGORIAS_DEFAULT[cat] || []).forEach(function(sub) {
+        filas.push([cat, sub]);
+      });
+    });
+    if (filas.length > 0) {
+      sheet.getRange(2, 1, filas.length, 2).setValues(filas);
+    }
+  }
+  return sheet;
+}
+
+/**
+ * Retorna las subcategorías actuales desde la hoja Config
+ */
+function obtenerSubcategorias() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = obtenerHojaConfig(ss);
+  var resultado = {};
+  CATEGORIAS.forEach(function(cat) { resultado[cat] = []; });
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return resultado;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  data.forEach(function(fila) {
+    var cat = String(fila[0]).trim();
+    var sub = String(fila[1]).trim();
+    if (cat && sub && resultado[cat] !== undefined) {
+      resultado[cat].push(sub);
+    }
+  });
+  return resultado;
+}
+
+/**
+ * Agrega una subcategoría a una categoría
+ */
+function agregarSubcategoria(categoria, subcategoria) {
+  try {
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+
+    if (!categoria || !subcategoria) {
+      return { success: false, message: 'Faltan datos' };
+    }
+    if (CATEGORIAS.indexOf(categoria) === -1) {
+      return { success: false, message: 'Categoría no válida' };
+    }
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = obtenerHojaConfig(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === categoria &&
+          String(data[i][1]).trim().toLowerCase() === subcategoria.toLowerCase()) {
+        return { success: false, message: 'Esa subcategoría ya existe' };
+      }
+    }
+
+    sheet.appendRow([categoria, subcategoria]);
+    return { success: true, message: 'Subcategoría agregada', subcategorias: obtenerSubcategorias() };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/**
+ * Elimina una subcategoría de una categoría
+ */
+function eliminarSubcategoria(categoria, subcategoria) {
+  try {
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = obtenerHojaConfig(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === categoria &&
+          String(data[i][1]).trim() === subcategoria) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'Subcategoría eliminada', subcategorias: obtenerSubcategorias() };
+      }
+    }
+
+    return { success: false, message: 'Subcategoría no encontrada' };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
 }
 
 /**
@@ -164,6 +278,7 @@ function configurarHoja() {
   var fechaStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   obtenerHojaMes(ss, fechaStr);
   obtenerHojaMovimientos(ss);
+  obtenerHojaConfig(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
@@ -278,9 +393,13 @@ function crearDashboard() {
       .setFontWeight('bold').setFontColor(row[2]);
   });
 
-  // Tabla de categorías y subcategorías
+  // Tabla de categorías y subcategorías (leyendo del Config dinámico)
+  var subcategoriasActuales = obtenerSubcategorias();
   var rowActual = 13;
-  Object.keys(SUBCATEGORIAS).forEach(function(cat) {
+  CATEGORIAS.forEach(function(cat) {
+    var subs = subcategoriasActuales[cat] || [];
+    if (subs.length === 0) return; // saltar categorías sin subcategorías
+
     // Encabezado de categoría
     dash.getRange(rowActual, 1, 1, 4).merge()
       .setValue(cat)
@@ -295,7 +414,7 @@ function crearDashboard() {
     rowActual++;
 
     // Subcategorías
-    SUBCATEGORIAS[cat].forEach(function(sub) {
+    subs.forEach(function(sub) {
       dash.getRange(rowActual, 1).setValue(sub);
 
       var filtroCatSub = '(' + rangoCat + '="' + cat + '")*(' + rangoSub + '="' + sub + '")';
@@ -316,7 +435,7 @@ function crearDashboard() {
     });
 
     // Fila de subtotal de la categoría
-    var filasSub = SUBCATEGORIAS[cat].length;
+    var filasSub = subs.length;
     var inicio = rowActual - filasSub;
     dash.getRange(rowActual, 1).setValue('Subtotal ' + cat)
       .setFontWeight('bold').setBackground('#f5f7fa');
