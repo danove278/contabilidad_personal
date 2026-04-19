@@ -3,8 +3,8 @@
  * Backend - Google Apps Script
  */
 
-// ID del Google Sheet (se configura después del despliegue)
 const SPREADSHEET_ID = '1bdQmYvmDKopiISSSLf-v-HrBlO1BYzdAIH2NrjafUFg';
+
 var MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -14,6 +14,22 @@ var HEADERS = [
   'Timestamp', 'Fecha', 'Categoría', 'Subcategoría',
   'Monto', 'Descripción', 'Método de Pago', 'Notas'
 ];
+
+var SUBCATEGORIAS = {
+  'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
+  'Ahorro': ['Fondo emergencia', 'Inversión', 'Meta específica'],
+  'Deudas': ['Préstamo', 'Tarjeta crédito', 'Hipoteca'],
+  'Gastos Fijos': ['Alquiler', 'Servicios', 'Seguro', 'Suscripciones', 'Transporte'],
+  'Gastos Variables': ['Comida', 'Entretenimiento', 'Ropa', 'Salud', 'Educación']
+};
+
+var COLORES = {
+  'Ingresos': '#27ae60',
+  'Ahorro': '#2980b9',
+  'Deudas': '#e74c3c',
+  'Gastos Fijos': '#f39c12',
+  'Gastos Variables': '#e67e22'
+};
 
 /**
  * Sirve la página HTML cuando se accede a la Web App
@@ -27,28 +43,35 @@ function doGet() {
 
 /**
  * Obtiene o crea la hoja del mes correspondiente a una fecha
- * @param {SpreadsheetApp.Spreadsheet} ss - Spreadsheet
- * @param {string} fechaStr - Fecha en formato YYYY-MM-DD
- * @returns {SpreadsheetApp.Sheet} Hoja del mes
  */
 function obtenerHojaMes(ss, fechaStr) {
   var partes = fechaStr.split('-');
   var anio = parseInt(partes[0]);
-  var mes = parseInt(partes[1]) - 1; // 0-indexed
-  var nombreHoja = MESES[mes] + ' ' + anio; // Ej: "Marzo 2026"
+  var mes = parseInt(partes[1]) - 1;
+  var nombreHoja = MESES[mes] + ' ' + anio;
 
   var sheet = ss.getSheetByName(nombreHoja);
-
   if (!sheet) {
     sheet = ss.insertSheet(nombreHoja);
     formatearHoja(sheet);
   }
-
   return sheet;
 }
 
 /**
- * Aplica formato a una hoja nueva (encabezados, anchos, etc.)
+ * Obtiene o crea la hoja maestra "Movimientos"
+ */
+function obtenerHojaMovimientos(ss) {
+  var sheet = ss.getSheetByName('Movimientos');
+  if (!sheet) {
+    sheet = ss.insertSheet('Movimientos');
+    formatearHoja(sheet);
+  }
+  return sheet;
+}
+
+/**
+ * Aplica formato a una hoja nueva
  */
 function formatearHoja(sheet) {
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
@@ -71,19 +94,19 @@ function formatearHoja(sheet) {
 }
 
 /**
- * Registra un nuevo movimiento en el Google Sheet
- * @param {Object} datos - Datos del formulario
- * @returns {Object} Resultado de la operación
+ * Registra un nuevo movimiento (en hoja del mes + hoja Movimientos)
  */
 function registrarMovimiento(datos) {
   try {
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = obtenerHojaMes(ss, datos.fecha);
+    var hojaMes = obtenerHojaMes(ss, datos.fecha);
+    var hojaMov = obtenerHojaMovimientos(ss);
 
     var timestamp = new Date();
+    var fechaDate = new Date(datos.fecha + 'T00:00:00');
     var fila = [
       timestamp,
-      datos.fecha,
+      fechaDate,
       datos.categoria,
       datos.subcategoria || '',
       parseFloat(datos.monto),
@@ -92,12 +115,13 @@ function registrarMovimiento(datos) {
       datos.notas || ''
     ];
 
-    sheet.appendRow(fila);
-
-    // Formato de la columna de monto como moneda
-    var lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow, 5).setNumberFormat('$#,##0.00');
-    sheet.getRange(lastRow, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    [hojaMes, hojaMov].forEach(function(sheet) {
+      sheet.appendRow(fila);
+      var lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+      sheet.getRange(lastRow, 2).setNumberFormat('dd/MM/yyyy');
+      sheet.getRange(lastRow, 5).setNumberFormat('$#,##0.00');
+    });
 
     return { success: true, message: 'Registro guardado correctamente' };
   } catch (error) {
@@ -139,5 +163,195 @@ function configurarHoja() {
   var hoy = new Date();
   var fechaStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   obtenerHojaMes(ss, fechaStr);
-  Logger.log('Hoja del mes actual creada correctamente.');
+  obtenerHojaMovimientos(ss);
+  Logger.log('Hojas configuradas correctamente.');
+}
+
+/**
+ * Migra registros existentes de las hojas mensuales a la hoja Movimientos.
+ * Útil si ya tienes datos antes de crear la hoja Movimientos.
+ */
+function migrarAHojaMovimientos() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var hojaMov = obtenerHojaMovimientos(ss);
+
+  // Limpiar Movimientos (mantener encabezados)
+  if (hojaMov.getLastRow() > 1) {
+    hojaMov.getRange(2, 1, hojaMov.getLastRow() - 1, HEADERS.length).clearContent();
+  }
+
+  var hojas = ss.getSheets();
+  var totalMigrado = 0;
+
+  hojas.forEach(function(sheet) {
+    var nombre = sheet.getName();
+    // Identificar hojas de mes (ej: "Marzo 2026")
+    var esMes = MESES.some(function(m) { return nombre.indexOf(m + ' ') === 0; });
+    if (!esMes) return;
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+
+    var datos = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+    datos.forEach(function(fila) {
+      if (fila[1]) { // tiene fecha
+        hojaMov.appendRow(fila);
+        var nr = hojaMov.getLastRow();
+        hojaMov.getRange(nr, 1).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+        hojaMov.getRange(nr, 2).setNumberFormat('dd/MM/yyyy');
+        hojaMov.getRange(nr, 5).setNumberFormat('$#,##0.00');
+        totalMigrado++;
+      }
+    });
+  });
+
+  Logger.log('Migración completada. Registros copiados: ' + totalMigrado);
+}
+
+/**
+ * Crea o reemplaza la hoja Dashboard con resumen por mes/año.
+ */
+function crearDashboard() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+  // Asegurar que existe Movimientos
+  obtenerHojaMovimientos(ss);
+
+  // Eliminar Dashboard existente
+  var existente = ss.getSheetByName('Dashboard');
+  if (existente) ss.deleteSheet(existente);
+
+  var dash = ss.insertSheet('Dashboard', 0);
+  var mesesLista = '{"Enero";"Febrero";"Marzo";"Abril";"Mayo";"Junio";"Julio";"Agosto";"Septiembre";"Octubre";"Noviembre";"Diciembre"}';
+
+  // Título
+  dash.getRange('A1:D1').merge()
+    .setValue('DASHBOARD - Registro de Gastos')
+    .setBackground('#4a90d9').setFontColor('white')
+    .setFontWeight('bold').setFontSize(14)
+    .setHorizontalAlignment('center');
+  dash.setRowHeight(1, 36);
+
+  // Filtros Mes y Año
+  dash.getRange('A3').setValue('Mes seleccionado:').setFontWeight('bold');
+  dash.getRange('B3').setValue(MESES[new Date().getMonth()]);
+  dash.getRange('B3').setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(MESES, true).build()
+  );
+  dash.getRange('B3').setBackground('#eaf3fb').setFontWeight('bold');
+
+  dash.getRange('A4').setValue('Año:').setFontWeight('bold');
+  dash.getRange('B4').setValue(new Date().getFullYear());
+  dash.getRange('B4').setBackground('#eaf3fb').setFontWeight('bold');
+
+  // Totales del mes
+  var filaMes = 'MATCH($B$3,' + mesesLista + ',0)';
+  var rangoCat = 'Movimientos!C2:C10000';
+  var rangoFecha = 'Movimientos!B2:B10000';
+  var rangoMonto = 'Movimientos!E2:E10000';
+  var rangoSub = 'Movimientos!D2:D10000';
+
+  var filtroMesAnio = '(MONTH(' + rangoFecha + ')=' + filaMes + ')*(YEAR(' + rangoFecha + ')=$B$4)';
+  var filtroAnio = '(YEAR(' + rangoFecha + ')=$B$4)';
+
+  // Bloque de resumen (fila 6-10)
+  var resumen = [
+    ['Total Ingresos (mes)',
+      '=IFERROR(SUMPRODUCT((' + rangoCat + '="Ingresos")*' + filtroMesAnio + '*' + rangoMonto + '),0)',
+      '#27ae60'],
+    ['Total Gastos (mes)',
+      '=IFERROR(SUMPRODUCT(((' + rangoCat + '="Gastos Fijos")+(' + rangoCat + '="Gastos Variables"))*' + filtroMesAnio + '*' + rangoMonto + '),0)',
+      '#e67e22'],
+    ['Total Ahorro (mes)',
+      '=IFERROR(SUMPRODUCT((' + rangoCat + '="Ahorro")*' + filtroMesAnio + '*' + rangoMonto + '),0)',
+      '#2980b9'],
+    ['Total Deudas (mes)',
+      '=IFERROR(SUMPRODUCT((' + rangoCat + '="Deudas")*' + filtroMesAnio + '*' + rangoMonto + '),0)',
+      '#e74c3c'],
+    ['Balance (mes)', '=B6-B7', '#2c3e50']
+  ];
+
+  resumen.forEach(function(row, i) {
+    var fila = 6 + i;
+    dash.getRange(fila, 1).setValue(row[0]).setFontWeight('bold');
+    dash.getRange(fila, 2).setFormula(row[1]).setNumberFormat('$#,##0.00')
+      .setFontWeight('bold').setFontColor(row[2]);
+  });
+
+  // Tabla de categorías y subcategorías
+  var rowActual = 13;
+  Object.keys(SUBCATEGORIAS).forEach(function(cat) {
+    // Encabezado de categoría
+    dash.getRange(rowActual, 1, 1, 4).merge()
+      .setValue(cat)
+      .setBackground(COLORES[cat]).setFontColor('white')
+      .setFontWeight('bold').setHorizontalAlignment('center');
+    rowActual++;
+
+    // Columnas
+    dash.getRange(rowActual, 1, 1, 4).setValues([['Subcategoría', 'Mes', 'Anual', 'Total']])
+      .setFontWeight('bold').setBackground('#f5f7fa').setHorizontalAlignment('center');
+    dash.getRange(rowActual, 1).setHorizontalAlignment('left');
+    rowActual++;
+
+    // Subcategorías
+    SUBCATEGORIAS[cat].forEach(function(sub) {
+      dash.getRange(rowActual, 1).setValue(sub);
+
+      var filtroCatSub = '(' + rangoCat + '="' + cat + '")*(' + rangoSub + '="' + sub + '")';
+
+      dash.getRange(rowActual, 2).setFormula(
+        '=IFERROR(SUMPRODUCT(' + filtroCatSub + '*' + filtroMesAnio + '*' + rangoMonto + '),0)'
+      ).setNumberFormat('$#,##0.00');
+
+      dash.getRange(rowActual, 3).setFormula(
+        '=IFERROR(SUMPRODUCT(' + filtroCatSub + '*' + filtroAnio + '*' + rangoMonto + '),0)'
+      ).setNumberFormat('$#,##0.00');
+
+      dash.getRange(rowActual, 4).setFormula(
+        '=IFERROR(SUMIFS(Movimientos!E:E, Movimientos!C:C, "' + cat + '", Movimientos!D:D, "' + sub + '"),0)'
+      ).setNumberFormat('$#,##0.00');
+
+      rowActual++;
+    });
+
+    // Fila de subtotal de la categoría
+    var filasSub = SUBCATEGORIAS[cat].length;
+    var inicio = rowActual - filasSub;
+    dash.getRange(rowActual, 1).setValue('Subtotal ' + cat)
+      .setFontWeight('bold').setBackground('#f5f7fa');
+    dash.getRange(rowActual, 2).setFormula('=SUM(B' + inicio + ':B' + (rowActual - 1) + ')')
+      .setNumberFormat('$#,##0.00').setFontWeight('bold').setBackground('#f5f7fa');
+    dash.getRange(rowActual, 3).setFormula('=SUM(C' + inicio + ':C' + (rowActual - 1) + ')')
+      .setNumberFormat('$#,##0.00').setFontWeight('bold').setBackground('#f5f7fa');
+    dash.getRange(rowActual, 4).setFormula('=SUM(D' + inicio + ':D' + (rowActual - 1) + ')')
+      .setNumberFormat('$#,##0.00').setFontWeight('bold').setBackground('#f5f7fa');
+    rowActual += 2; // gap
+  });
+
+  // Lista de Meses (columna F como referencia)
+  dash.getRange('F3').setValue('Meses').setFontWeight('bold')
+    .setBackground('#4a90d9').setFontColor('white').setHorizontalAlignment('center');
+  MESES.forEach(function(mes, i) {
+    dash.getRange(4 + i, 6).setValue(mes);
+  });
+
+  // Anchos
+  dash.setColumnWidth(1, 200);
+  dash.setColumnWidth(2, 120);
+  dash.setColumnWidth(3, 120);
+  dash.setColumnWidth(4, 120);
+  dash.setColumnWidth(5, 20);
+  dash.setColumnWidth(6, 120);
+
+  // Congelar filas superiores
+  dash.setFrozenRows(4);
+
+  // Ocultar cuadrícula para mejor apariencia
+  dash.hideGridlines();
+
+  // Activar la hoja
+  ss.setActiveSheet(dash);
+
+  Logger.log('Dashboard creado correctamente.');
 }
