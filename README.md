@@ -17,6 +17,7 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
   - Gastos Fijos: Alquiler, Servicios, Seguro, Suscripciones, Transporte
   - Gastos Variables: Comida, Entretenimiento, Ropa, Salud, Educación
 - **Métodos de pago**: Efectivo, Tarjeta Débito, Tarjeta Crédito, Transferencia, Otro
+- **Sin secretos en el código**: el ID del Google Sheet se guarda en las **Propiedades del script** de Apps Script, no en el repositorio. El código fuente puede publicarse en GitHub público sin exponer nada de tus datos
 
 ## Arquitectura
 
@@ -93,7 +94,7 @@ Pasos resumidos:
 1. Crear un Google Sheet y copiar su ID
 2. Crear un proyecto en Google Apps Script
 3. Pegar el contenido de `Code.gs` e `Index.html`
-4. Reemplazar `SPREADSHEET_ID` con el ID real
+4. Guardar el ID en las **Propiedades del script** (ejecutando `configurarSpreadsheetId` o manualmente — **nunca en el código**)
 5. Ejecutar `configurarHoja` y luego `crearDashboard` desde el editor
 6. Desplegar como Web App con acceso "Cualquier persona con cuenta de Google"
 
@@ -112,6 +113,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.2.1** — Seguridad: el `SPREADSHEET_ID` se movió del código a **PropertiesService** (Propiedades del script). El repositorio ya no contiene información sensible
 - **v1.2.0** — Gestión de subcategorías desde la app (modal ⚙️) + hoja "Config" para almacenarlas dinámicamente
 - **v1.1.1** — Fix de error en `crearDashboard` y mejoras de documentación
 - **v1.1.0** — Hoja Dashboard con resumen por mes/año + hoja maestra "Movimientos" + migración de datos existentes

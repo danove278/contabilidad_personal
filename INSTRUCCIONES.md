@@ -21,7 +21,6 @@
 1. En el editor, ya hay un archivo `Code.gs` abierto
 2. Borra todo el contenido existente
 3. Copia y pega todo el contenido del archivo `Code.gs` de esta carpeta
-4. **IMPORTANTE:** Reemplaza `'TU_SPREADSHEET_ID_AQUI'` con el ID que copiaste en el Paso 1
 
 ### Archivo `Index.html`:
 1. En el menú lateral izquierdo, haz clic en **"+"** junto a "Archivos"
@@ -30,7 +29,31 @@
 4. Borra todo el contenido existente
 5. Copia y pega todo el contenido del archivo `Index.html` de esta carpeta
 
-## Paso 4: Configurar las hojas
+## Paso 4: Configurar el ID del Spreadsheet (seguridad)
+
+Por seguridad, el ID del Sheet NO se guarda en el código. Lo almacenamos en las **Propiedades del script** de Apps Script (privadas, nunca se comparten).
+
+Elige **una** de las dos opciones:
+
+### Opción A — Por función (recomendada)
+
+1. En `Code.gs`, busca la función `configurarSpreadsheetId` (arriba del archivo)
+2. Reemplaza `'PON_AQUI_TU_ID_DE_SPREADSHEET'` con el ID real del Paso 1
+3. Guarda (Ctrl+S)
+4. Selecciona `configurarSpreadsheetId` en el dropdown de funciones y clic en **Ejecutar**
+5. Verás "SPREADSHEET_ID configurado correctamente" en el Registro de ejecución
+6. **Vuelve a poner el placeholder** (`'PON_AQUI_TU_ID_DE_SPREADSHEET'`) en el código — el ID ya quedó guardado en las propiedades del script
+
+### Opción B — Manual
+
+1. En Apps Script, ve a **⚙️ Configuración del proyecto** (ícono de engranaje a la izquierda)
+2. Baja hasta **"Propiedades del script"** → clic en **"Agregar propiedad del script"**
+3. Ingresa:
+   - **Propiedad:** `SPREADSHEET_ID`
+   - **Valor:** tu ID real del Paso 1
+4. Clic en **"Guardar propiedades del script"**
+
+## Paso 5: Configurar las hojas
 
 1. En el editor de Apps Script, selecciona la función `configurarHoja` en el dropdown de funciones (arriba)
 2. Haz clic en **"Ejecutar"**
@@ -44,7 +67,7 @@
    - **Movimientos** (hoja maestra con todos los registros)
    - **Config** (subcategorías editables desde la app)
 
-## Paso 5: Crear el Dashboard
+## Paso 6: Crear el Dashboard
 
 1. En el dropdown de funciones, selecciona `crearDashboard`
 2. Clic en **"Ejecutar"**
@@ -52,18 +75,18 @@
 
 > Ejecuta `crearDashboard` de nuevo cada vez que agregues o elimines subcategorías desde la app, para que las nuevas filas aparezcan en el Dashboard.
 
-## Paso 6: Desplegar como Web App
+## Paso 7: Desplegar como Web App
 
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.2.0"
+   - **Descripción:** "Registro de Gastos v1.2.1"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
 5. Copia la **URL de la aplicación web** — esta es tu app
 
-## Paso 7: Usar la aplicación
+## Paso 8: Usar la aplicación
 
 1. Abre la URL de la aplicación web en cualquier navegador o dispositivo móvil
 2. Inicia sesión con tu cuenta de Google (si no lo has hecho)

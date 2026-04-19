@@ -1,9 +1,50 @@
 /**
  * Aplicación Web de Registro de Gastos Personales
  * Backend - Google Apps Script
+ *
+ * CONFIGURACIÓN INICIAL:
+ * El ID del Google Sheet NO se guarda en el código por seguridad.
+ * Debes configurarlo una sola vez ejecutando la función:
+ *
+ *     configurarSpreadsheetId()
+ *
+ * O manualmente desde: Configuración del proyecto > Propiedades del script
+ * con la clave: SPREADSHEET_ID
  */
 
-const SPREADSHEET_ID = '1bdQmYvmDKopiISSSLf-v-HrBlO1BYzdAIH2NrjafUFg';
+/**
+ * Obtiene el ID del Google Sheet desde las propiedades del script
+ */
+function getSpreadsheetId() {
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!id) {
+    throw new Error(
+      'SPREADSHEET_ID no configurado. Ejecuta configurarSpreadsheetId() una vez ' +
+      'o agrégalo manualmente en Configuración del proyecto > Propiedades del script.'
+    );
+  }
+  return id;
+}
+
+/**
+ * Configura el SPREADSHEET_ID en las propiedades del script.
+ * Ejecuta esta función UNA SOLA VEZ para guardar el ID de tu Google Sheet.
+ *
+ * PASOS:
+ * 1. Edita la variable SPREADSHEET_ID_A_CONFIGURAR abajo con tu ID real
+ * 2. Selecciona esta función en el dropdown y haz clic en Ejecutar
+ * 3. Después puedes volver a poner el placeholder en la variable (el ID ya queda guardado)
+ */
+function configurarSpreadsheetId() {
+  var SPREADSHEET_ID_A_CONFIGURAR = 'PON_AQUI_TU_ID_DE_SPREADSHEET';
+
+  if (SPREADSHEET_ID_A_CONFIGURAR === 'PON_AQUI_TU_ID_DE_SPREADSHEET') {
+    throw new Error('Edita la variable SPREADSHEET_ID_A_CONFIGURAR con tu ID real antes de ejecutar esta función.');
+  }
+
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', SPREADSHEET_ID_A_CONFIGURAR);
+  Logger.log('SPREADSHEET_ID configurado correctamente.');
+}
 
 var MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -106,7 +147,7 @@ function obtenerHojaConfig(ss) {
  * Retorna las subcategorías actuales desde la hoja Config
  */
 function obtenerSubcategorias() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var sheet = obtenerHojaConfig(ss);
   var resultado = {};
   CATEGORIAS.forEach(function(cat) { resultado[cat] = []; });
@@ -140,7 +181,7 @@ function agregarSubcategoria(categoria, subcategoria) {
       return { success: false, message: 'Categoría no válida' };
     }
 
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var sheet = obtenerHojaConfig(ss);
     var data = sheet.getDataRange().getValues();
 
@@ -166,7 +207,7 @@ function eliminarSubcategoria(categoria, subcategoria) {
     categoria = String(categoria || '').trim();
     subcategoria = String(subcategoria || '').trim();
 
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var sheet = obtenerHojaConfig(ss);
     var data = sheet.getDataRange().getValues();
 
@@ -212,7 +253,7 @@ function formatearHoja(sheet) {
  */
 function registrarMovimiento(datos) {
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var hojaMes = obtenerHojaMes(ss, datos.fecha);
     var hojaMov = obtenerHojaMovimientos(ss);
 
@@ -273,7 +314,7 @@ function obtenerMetodosPago() {
  * Configuración inicial: crea la hoja del mes actual
  */
 function configurarHoja() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var hoy = new Date();
   var fechaStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   obtenerHojaMes(ss, fechaStr);
@@ -287,7 +328,7 @@ function configurarHoja() {
  * Útil si ya tienes datos antes de crear la hoja Movimientos.
  */
 function migrarAHojaMovimientos() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
   var hojaMov = obtenerHojaMovimientos(ss);
 
   // Limpiar Movimientos (mantener encabezados)
@@ -327,7 +368,7 @@ function migrarAHojaMovimientos() {
  * Crea o reemplaza la hoja Dashboard con resumen por mes/año.
  */
 function crearDashboard() {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
 
   // Asegurar que existe Movimientos
   obtenerHojaMovimientos(ss);
