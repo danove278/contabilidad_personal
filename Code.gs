@@ -815,6 +815,9 @@ function normalizarTexto(t) {
 
 /**
  * Extrae los campos de interés del cuerpo de un email de Chase.
+ * Soporta 2 formatos:
+ *   (a) Crédito: campo etiquetado "Comercio VALOR" + "Fecha ..."
+ *   (b) Débito:  "...de $NN.NN con MERCHANT" en el encabezado + "Realizada el ..."
  * Devuelve { fecha, elementoRaw, ultimos4, monto } o null si falla.
  */
 function parsearEmailChase(body, emailDate) {
@@ -829,13 +832,21 @@ function parsearEmailChase(body, emailDate) {
   var mLast4 = text.match(/\(\s*\.{3}\s*(\d{4})\s*\)/);
   var ultimos4 = mLast4 ? mLast4[1] : '';
 
-  // Comercio: valor después de "Comercio" hasta salto de línea o "Cantidad"
+  // Elemento (comercio) — intenta 2 patrones:
+  var elementoRaw = '';
+  // (a) Crédito: campo etiquetado
   var mComercio = text.match(/Comercio\s*[:\-]?\s*([^\n]+?)(?:\n|Cantidad|$)/i);
-  var elementoRaw = mComercio ? mComercio[1].trim() : '';
+  if (mComercio) {
+    elementoRaw = mComercio[1].trim();
+  } else {
+    // (b) Débito: "...de $NN.NN con MERCHANT" (nombre inline en el encabezado)
+    var mDebito = text.match(/de\s+\$\s*[\d,]+\.\d{2}\s+con\s+([^\n]+?)(?:\n|Cuenta|Realizada|$)/i);
+    if (mDebito) elementoRaw = mDebito[1].trim();
+  }
 
-  // Fecha: "Fecha ... mmm DD, YYYY ..."
+  // Fecha: "Fecha ..." (crédito) o "Realizada el ..." (débito)
   var fecha = null;
-  var mFecha = text.match(/Fecha\s*[:\-]?\s*([a-záéíóú]{3,4})\.?\s*(\d{1,2}),?\s*(\d{4})/i);
+  var mFecha = text.match(/(?:Fecha|Realizada el)\s*[:\-]?\s*([a-záéíóú]{3,4})\.?\s*(\d{1,2}),?\s*(\d{4})/i);
   if (mFecha) {
     var mesStr = mFecha[1].toLowerCase().substring(0, 3);
     var dia = parseInt(mFecha[2], 10);
@@ -1137,6 +1148,20 @@ function testParserChase() {
              'Comercio CRUNCHYROLL.COM\n' +
              'Cantidad $15.83';
   var res = parsearEmailChase(body, new Date());
-  Logger.log('Test parser Chase: ' + JSON.stringify(res));
+  Logger.log('Test parser Chase (crédito): ' + JSON.stringify(res));
   // Esperado: {"fecha":"2026-08-15","elementoRaw":"CRUNCHYROLL.COM","ultimos4":"8598","monto":15.83}
+}
+
+/**
+ * Prueba el parser con el formato de email de Chase para tarjeta de débito.
+ */
+function testParserChaseDebito() {
+  var body = 'Alerta de transacción\n\n' +
+             'Realizaste una transacción con tarjeta de débito de $31.20 con MY SUNNY LAUNDRY\n\n' +
+             'Cuenta que termina en (...8310)\n' +
+             'Realizada el ago 15, 2026 a las 2:22 PM ET\n' +
+             'Cantidad $31.20';
+  var res = parsearEmailChase(body, new Date());
+  Logger.log('Test parser Chase (débito): ' + JSON.stringify(res));
+  // Esperado: {"fecha":"2026-08-15","elementoRaw":"MY SUNNY LAUNDRY","ultimos4":"8310","monto":31.20}
 }

@@ -142,6 +142,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.4.1** — El parser de Chase ahora también entiende emails de **tarjeta de débito** ("Realizaste una transacción con tarjeta de débito de $NN.NN con MERCHANT" + "Realizada el" en lugar de "Fecha"). Los emails de débito que ya habían llegado antes se reprocesan solos al sincronizar
 - **v1.4.0** — **Autoregistro desde emails de Chase**. Parser de "Alerta de transacción", cruce con hojas Elementos + Tarjetas, hoja **Pendientes** para mapeos faltantes que se resuelven solos al agregar el elemento/tarjeta, trigger automático cada 15 min y botón manual **"Sincronizar ahora"** en nueva pestaña **Emails** del modal ⚙️. Privacidad por diseño: el script solo consulta emails con label `Banco/Alertas`
 - **v1.3.0** — Nueva pestaña **Tarjetas** en el modal ⚙️ (últimos 4 dígitos + Débito/Crédito + alias) y **elementos** anidados dentro de subcategorías de Gastos Fijos/Variables (ej: `Suscripciones → Crunchyroll`). Dropdown de elemento en el formulario que autocompleta la Descripción. Base para el autoregistro automático de emails del banco (v1.4.0)
 - **v1.2.1** — Seguridad: el `SPREADSHEET_ID` se movió del código a **PropertiesService** (Propiedades del script). El repositorio ya no contiene información sensible

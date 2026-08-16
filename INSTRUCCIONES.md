@@ -83,7 +83,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.4.0"
+   - **Descripción:** "Registro de Gastos v1.4.1"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -175,7 +175,12 @@ Debe imprimir algo parecido a:
 {"fecha":"2026-08-15","elementoRaw":"CRUNCHYROLL.COM","ultimos4":"8598","monto":15.83}
 ```
 
-Si sale eso, el parser funciona. Si sale `null`, algo cambió en el formato del email — avísame.
+Después ejecuta **`testParserChaseDebito`** — cubre el formato de tarjeta de débito ("Realizaste una transacción con tarjeta de débito de $NN.NN con MERCHANT"):
+```
+{"fecha":"2026-08-15","elementoRaw":"MY SUNNY LAUNDRY","ultimos4":"8310","monto":31.2}
+```
+
+Si alguno sale `null`, algo cambió en el formato del email — avísame.
 
 ### Paso E — Sincronización manual
 
