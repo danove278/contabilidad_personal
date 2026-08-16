@@ -84,7 +84,10 @@ var HEADERS_PENDIENTES = ['Fecha', 'Monto', 'Elemento (raw)', 'Últimos4', 'Moti
    Ver INSTRUCCIONES.md para los pasos exactos.
    ============================================================ */
 
-var GMAIL_QUERY = 'label:Banco/Alertas is:unread newer_than:7d';
+// El bot procesa cualquier email en Banco/Alertas que NO tenga el label
+// Banco/Procesado. Abrir un email en Gmail ya no lo saca del pipeline —
+// solo el bot puede marcarlo como procesado (aplica LABEL_PROCESADO al final).
+var GMAIL_QUERY = 'label:Banco/Alertas -label:Banco/Procesado newer_than:7d';
 var LABEL_PROCESADO = 'Banco/Procesado';
 
 // Verificación defensiva del remitente real antes de parsear
@@ -1005,7 +1008,8 @@ function procesarEmailsBancarios() {
     var procesoAlgunEnEsteThread = false;
 
     messages.forEach(function(msg) {
-      if (!msg.isUnread()) return;
+      // No filtramos por unread: la fuente de la verdad de "ya procesado"
+      // es el label LABEL_PROCESADO del thread (aplicado abajo).
       if (!esRemitentePermitido(msg.getFrom())) {
         stats.ignorados++;
         return;
