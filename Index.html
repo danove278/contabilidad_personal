@@ -39,6 +39,7 @@
       padding: 24px 20px;
       text-align: center;
       box-shadow: 0 4px 15px rgba(74,144,217,0.3);
+      position: relative;
     }
 
     .header h1 {
@@ -122,6 +123,10 @@
 
     .form-group:last-child {
       margin-bottom: 0;
+    }
+
+    .form-group.hidden {
+      display: none;
     }
 
     .form-group label {
@@ -266,7 +271,7 @@
       font-size: 14px;
       font-weight: 600;
       box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-      z-index: 1000;
+      z-index: 3000;
       transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       max-width: 90%;
       text-align: center;
@@ -276,13 +281,8 @@
       transform: translateX(-50%) translateY(0);
     }
 
-    .toast.success {
-      background: var(--success);
-    }
-
-    .toast.error {
-      background: var(--danger);
-    }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
 
     /* Último registro */
     .last-entry {
@@ -295,9 +295,7 @@
       display: none;
     }
 
-    .last-entry.visible {
-      display: block;
-    }
+    .last-entry.visible { display: block; }
 
     .last-entry .le-title {
       font-size: 11px;
@@ -332,15 +330,9 @@
       display: none;
     }
 
-    .form-group.error .error-msg {
-      display: block;
-    }
+    .form-group.error .error-msg { display: block; }
 
     /* Botón de configuración */
-    .header {
-      position: relative;
-    }
-
     .settings-btn {
       position: absolute;
       top: 50%;
@@ -360,9 +352,7 @@
       justify-content: center;
     }
 
-    .settings-btn:hover {
-      background: rgba(255,255,255,0.3);
-    }
+    .settings-btn:hover { background: rgba(255,255,255,0.3); }
 
     /* Modal */
     .modal-backdrop {
@@ -377,14 +367,12 @@
       overflow-y: auto;
     }
 
-    .modal-backdrop.open {
-      display: flex;
-    }
+    .modal-backdrop.open { display: flex; }
 
     .modal {
       background: var(--card);
       border-radius: var(--radius);
-      max-width: 520px;
+      max-width: 560px;
       width: 100%;
       margin: 20px 0;
       overflow: hidden;
@@ -415,12 +403,45 @@
       padding: 0 4px;
     }
 
+    /* Tabs */
+    .modal-tabs {
+      display: flex;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-tab {
+      flex: 1;
+      padding: 14px 12px;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-light);
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .modal-tab:hover { color: var(--text); }
+
+    .modal-tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      background: var(--card);
+    }
+
     .modal-body {
       padding: 20px;
       max-height: 70vh;
       overflow-y: auto;
     }
 
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Subcategorías por categoría */
     .config-category {
       margin-bottom: 22px;
     }
@@ -442,14 +463,128 @@
     }
 
     .config-subcat-item {
+      background: var(--bg);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .config-subcat-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 8px 12px;
-      background: var(--bg);
-      border-radius: 8px;
       font-size: 14px;
+      gap: 6px;
     }
+
+    .config-subcat-name {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      cursor: default;
+    }
+
+    .config-subcat-name.expandable { cursor: pointer; }
+
+    .config-chevron {
+      display: inline-block;
+      width: 14px;
+      color: var(--text-light);
+      font-size: 11px;
+      transition: transform 0.2s;
+    }
+
+    .config-subcat-item.expanded .config-chevron {
+      transform: rotate(90deg);
+    }
+
+    .config-badge {
+      background: var(--primary);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 10px;
+      min-width: 20px;
+      text-align: center;
+    }
+
+    .config-elementos-panel {
+      display: none;
+      padding: 4px 12px 12px 34px;
+      border-top: 1px solid var(--border);
+      background: rgba(74,144,217,0.04);
+    }
+
+    .config-subcat-item.expanded .config-elementos-panel {
+      display: block;
+    }
+
+    .config-elemento-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      background: white;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-top: 6px;
+    }
+
+    .config-elemento-item span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .config-elemento-item span::before {
+      content: '·';
+      color: var(--text-light);
+      font-weight: 700;
+    }
+
+    .config-elementos-empty {
+      color: var(--text-light);
+      font-size: 12px;
+      font-style: italic;
+      padding: 8px 10px;
+    }
+
+    .config-elemento-add-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .config-elemento-add-row input {
+      flex: 1;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .config-elemento-add-row input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .config-elemento-add-row button {
+      padding: 6px 12px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .config-elemento-add-row button:hover { background: var(--primary-dark); }
+    .config-elemento-add-row button:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .config-delete-btn {
       background: none;
@@ -462,17 +597,15 @@
       border-radius: 6px;
     }
 
-    .config-delete-btn:hover {
-      background: rgba(231,76,60,0.1);
-    }
+    .config-delete-btn:hover { background: rgba(231,76,60,0.1); }
 
     .config-add-row {
       display: flex;
       gap: 6px;
     }
 
-    .config-add-row input {
-      flex: 1;
+    .config-add-row input,
+    .config-add-row select {
       padding: 8px 12px;
       border: 2px solid var(--border);
       border-radius: 8px;
@@ -480,7 +613,11 @@
       font-family: inherit;
     }
 
-    .config-add-row input:focus {
+    .config-add-row input { flex: 1; }
+    .config-add-row select { -webkit-appearance: none; appearance: none; }
+
+    .config-add-row input:focus,
+    .config-add-row select:focus {
       outline: none;
       border-color: var(--primary);
     }
@@ -497,14 +634,8 @@
       font-family: inherit;
     }
 
-    .config-add-row button:hover {
-      background: var(--primary-dark);
-    }
-
-    .config-add-row button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    .config-add-row button:hover { background: var(--primary-dark); }
+    .config-add-row button:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .config-empty {
       color: var(--text-light);
@@ -513,15 +644,104 @@
       padding: 8px 12px;
     }
 
+    /* Tarjetas */
+    .tarjeta-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--bg);
+      border-radius: 8px;
+      margin-bottom: 6px;
+    }
+
+    .tarjeta-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tarjeta-info-top {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tarjeta-info-top .last4 {
+      font-family: 'SF Mono', Menlo, monospace;
+      background: var(--primary);
+      color: white;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .tarjeta-info-tipo {
+      font-size: 12px;
+      color: var(--text-light);
+    }
+
+    .tarjeta-info-tipo.credito { color: #e67e22; }
+    .tarjeta-info-tipo.debito { color: #2980b9; }
+
+    .tarjeta-add-form {
+      display: grid;
+      grid-template-columns: 90px 1fr 110px auto;
+      gap: 6px;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    .tarjeta-add-form input,
+    .tarjeta-add-form select {
+      padding: 8px 10px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .tarjeta-add-form input:focus,
+    .tarjeta-add-form select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .tarjeta-add-form button {
+      padding: 8px 14px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .tarjeta-add-form button:hover { background: var(--primary-dark); }
+    .tarjeta-add-form button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .tab-hint {
+      font-size: 12px;
+      color: var(--text-light);
+      background: rgba(74,144,217,0.06);
+      border-left: 3px solid var(--primary);
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+
     /* Responsive */
     @media (max-width: 400px) {
       .form-row {
         grid-template-columns: 1fr;
       }
 
-      .header h1 {
-        font-size: 20px;
-      }
+      .header h1 { font-size: 20px; }
 
       .chip {
         padding: 8px 14px;
@@ -533,6 +753,10 @@
         width: 36px;
         height: 36px;
       }
+
+      .tarjeta-add-form {
+        grid-template-columns: 1fr 1fr;
+      }
     }
   </style>
 </head>
@@ -541,18 +765,23 @@
   <div class="header">
     <h1>Registro de Gastos</h1>
     <p>Registra tus movimientos financieros</p>
-    <button class="settings-btn" title="Configurar subcategorías" onclick="abrirConfig()">&#9881;</button>
+    <button class="settings-btn" title="Configurar" onclick="abrirConfig()">&#9881;</button>
   </div>
 
   <!-- Modal de configuración -->
   <div class="modal-backdrop" id="modalConfig" onclick="cerrarConfigFondo(event)">
     <div class="modal">
       <div class="modal-header">
-        <h2>Configurar subcategorías</h2>
+        <h2>Configurar</h2>
         <button class="modal-close" onclick="cerrarConfig()" title="Cerrar">&times;</button>
       </div>
-      <div class="modal-body" id="modalConfigBody">
-        <!-- Generado dinámicamente -->
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-tab="subcategorias" onclick="switchTab('subcategorias')">Subcategorías</button>
+        <button class="modal-tab" data-tab="tarjetas" onclick="switchTab('tarjetas')">Tarjetas</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-panel active" id="tabSubcategorias"></div>
+        <div class="tab-panel" id="tabTarjetas"></div>
       </div>
     </div>
   </div>
@@ -592,8 +821,15 @@
 
         <div class="form-group">
           <label for="subcategoria">Subcategoría</label>
-          <select id="subcategoria" disabled>
+          <select id="subcategoria" disabled onchange="actualizarElementos()">
             <option value="">-- Selecciona una categoría primero --</option>
+          </select>
+        </div>
+
+        <div class="form-group hidden" id="grupoElemento">
+          <label for="elemento">Elemento <span class="optional">(opcional)</span></label>
+          <select id="elemento" onchange="onElementoChange()">
+            <option value="">-- Sin elemento --</option>
           </select>
         </div>
 
@@ -635,9 +871,12 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    /* ============================================================
+       ESTADO GLOBAL
+       ============================================================ */
+
     var categoriaSeleccionada = '';
 
-    // Colores por categoría (para la UI de configuración)
     var COLORES_CAT = {
       'Ingresos': '#27ae60',
       'Ahorro': '#2980b9',
@@ -647,8 +886,8 @@
     };
 
     var CATEGORIAS_ORDEN = ['Ingresos', 'Ahorro', 'Deudas', 'Gastos Fijos', 'Gastos Variables'];
+    var CATEGORIAS_CON_ELEMENTOS = ['Gastos Fijos', 'Gastos Variables'];
 
-    // Subcategorías (se cargan desde el backend al iniciar)
     var subcategorias = {
       'Ingresos': [],
       'Ahorro': [],
@@ -657,15 +896,25 @@
       'Gastos Variables': []
     };
 
-    // Establecer fecha de hoy
+    // { 'Gastos Fijos': { 'Suscripciones': ['Crunchyroll', ...] } }
+    var elementos = { 'Gastos Fijos': {}, 'Gastos Variables': {} };
+
+    // [{ ultimos4, tipo, alias }]
+    var tarjetas = [];
+
+    var subcategoriasExpandidas = {};  // ej: {'Gastos Fijos::Suscripciones': true}
+
+    var previewLocal = (typeof google === 'undefined' || !google.script || !google.script.run);
+
+    // Fecha de hoy
     document.getElementById('fecha').valueAsDate = new Date();
 
-    /**
-     * Carga las subcategorías desde el backend
-     */
-    function cargarSubcategorias() {
-      if (typeof google === 'undefined' || !google.script || !google.script.run) {
-        // Entorno sin Apps Script (preview local) - usar defaults
+    /* ============================================================
+       CARGA INICIAL DE DATOS
+       ============================================================ */
+
+    function cargarDatos() {
+      if (previewLocal) {
         subcategorias = {
           'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
           'Ahorro': ['Fondo emergencia', 'Inversión', 'Meta específica'],
@@ -673,6 +922,13 @@
           'Gastos Fijos': ['Alquiler', 'Servicios', 'Seguro', 'Suscripciones', 'Transporte'],
           'Gastos Variables': ['Comida', 'Entretenimiento', 'Ropa', 'Salud', 'Educación']
         };
+        elementos = {
+          'Gastos Fijos': { 'Suscripciones': ['Crunchyroll', 'Netflix'] },
+          'Gastos Variables': { 'Comida': ['Starbucks'] }
+        };
+        tarjetas = [
+          { ultimos4: '8598', tipo: 'Crédito', alias: 'Chase Sapphire' }
+        ];
         if (categoriaSeleccionada) actualizarSubcategorias(categoriaSeleccionada);
         return;
       }
@@ -682,18 +938,29 @@
           if (data) subcategorias = data;
           if (categoriaSeleccionada) actualizarSubcategorias(categoriaSeleccionada);
         })
-        .withFailureHandler(function(err) {
-          console.error('Error cargando subcategorías:', err);
-        })
+        .withFailureHandler(function(err) { console.error('subcats:', err); })
         .obtenerSubcategorias();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          if (data) elementos = data;
+          if (categoriaSeleccionada) actualizarElementos();
+        })
+        .withFailureHandler(function(err) { console.error('elementos:', err); })
+        .obtenerElementos();
+
+      google.script.run
+        .withSuccessHandler(function(data) { if (data) tarjetas = data; })
+        .withFailureHandler(function(err) { console.error('tarjetas:', err); })
+        .obtenerTarjetas();
     }
 
-    // Cargar al iniciar
-    cargarSubcategorias();
+    cargarDatos();
 
-    /**
-     * Actualiza el dropdown de subcategorías según la categoría
-     */
+    /* ============================================================
+       DROPDOWNS DEL FORMULARIO
+       ============================================================ */
+
     function actualizarSubcategorias(categoria) {
       var select = document.getElementById('subcategoria');
       select.innerHTML = '';
@@ -701,10 +968,10 @@
       var opts = subcategorias[categoria] || [];
       if (opts.length > 0) {
         select.disabled = false;
-        var defaultOpt = document.createElement('option');
-        defaultOpt.value = '';
-        defaultOpt.textContent = '-- Selecciona subcategoría --';
-        select.appendChild(defaultOpt);
+        var def = document.createElement('option');
+        def.value = '';
+        def.textContent = '-- Selecciona subcategoría --';
+        select.appendChild(def);
 
         opts.forEach(function(sub) {
           var opt = document.createElement('option');
@@ -719,76 +986,95 @@
         noOpt.textContent = '-- Sin subcategorías --';
         select.appendChild(noOpt);
       }
+      actualizarElementos();
     }
 
-    /**
-     * Selecciona una categoría
-     */
+    function actualizarElementos() {
+      var grupo = document.getElementById('grupoElemento');
+      var select = document.getElementById('elemento');
+      var subcategoria = document.getElementById('subcategoria').value;
+
+      select.innerHTML = '';
+
+      var puedeTenerElementos = CATEGORIAS_CON_ELEMENTOS.indexOf(categoriaSeleccionada) !== -1;
+      var lista = puedeTenerElementos && elementos[categoriaSeleccionada]
+        ? (elementos[categoriaSeleccionada][subcategoria] || [])
+        : [];
+
+      if (lista.length === 0) {
+        grupo.classList.add('hidden');
+        return;
+      }
+
+      grupo.classList.remove('hidden');
+      var def = document.createElement('option');
+      def.value = '';
+      def.textContent = '-- Sin elemento --';
+      select.appendChild(def);
+
+      lista.forEach(function(el) {
+        var opt = document.createElement('option');
+        opt.value = el;
+        opt.textContent = el;
+        select.appendChild(opt);
+      });
+    }
+
+    function onElementoChange() {
+      var elemento = document.getElementById('elemento').value;
+      if (!elemento) return;
+      var desc = document.getElementById('descripcion');
+      // Solo autocompletar si el campo está vacío o coincidía con otro elemento anterior
+      if (!desc.value.trim()) {
+        desc.value = elemento;
+      }
+    }
+
     function selectCategory(chip) {
-      // Deseleccionar todos
       document.querySelectorAll('.chip').forEach(function(c) {
         c.classList.remove('selected');
       });
-
-      // Seleccionar el clickeado
       chip.classList.add('selected');
       categoriaSeleccionada = chip.getAttribute('data-cat');
-
-      // Actualizar subcategorías
       actualizarSubcategorias(categoriaSeleccionada);
-
-      // Ocultar error
       document.getElementById('categoryError').style.display = 'none';
     }
 
-    /**
-     * Muestra un toast de notificación
-     */
+    /* ============================================================
+       TOAST
+       ============================================================ */
+
     function showToast(message, type) {
       var toast = document.getElementById('toast');
       toast.textContent = message;
       toast.className = 'toast ' + type;
-
-      // Forzar reflow para reiniciar la animación
-      toast.offsetHeight;
+      toast.offsetHeight; // reflow
       toast.classList.add('show');
-
-      setTimeout(function() {
-        toast.classList.remove('show');
-      }, 3000);
+      setTimeout(function() { toast.classList.remove('show'); }, 3000);
     }
 
-    /**
-     * Valida el formulario
-     */
+    /* ============================================================
+       ENVÍO DEL FORMULARIO
+       ============================================================ */
+
     function validarFormulario() {
       var valido = true;
-
-      // Validar categoría
       if (!categoriaSeleccionada) {
         document.getElementById('categoryError').style.display = 'block';
         valido = false;
       }
-
-      // Validar monto
       var monto = document.getElementById('monto').value;
       if (!monto || parseFloat(monto) <= 0) {
         document.getElementById('monto').parentElement.parentElement.classList.add('error');
         valido = false;
       }
-
-      // Validar fecha
       if (!document.getElementById('fecha').value) {
         document.getElementById('fecha').parentElement.classList.add('error');
         valido = false;
       }
-
       return valido;
     }
 
-    /**
-     * Limpia errores de validación
-     */
     function limpiarErrores() {
       document.querySelectorAll('.form-group.error').forEach(function(g) {
         g.classList.remove('error');
@@ -796,16 +1082,10 @@
       document.getElementById('categoryError').style.display = 'none';
     }
 
-    /**
-     * Envía el formulario
-     */
     function enviarFormulario(e) {
       e.preventDefault();
       limpiarErrores();
-
-      if (!validarFormulario()) {
-        return;
-      }
+      if (!validarFormulario()) return;
 
       var btn = document.getElementById('btnSubmit');
       btn.disabled = true;
@@ -821,11 +1101,17 @@
         notas: document.getElementById('notas').value.trim()
       };
 
+      if (previewLocal) {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        showToast('Preview local: no se guardó', 'error');
+        return;
+      }
+
       google.script.run
         .withSuccessHandler(function(result) {
           btn.disabled = false;
           btn.classList.remove('loading');
-
           if (result.success) {
             showToast(result.message, 'success');
             mostrarUltimoRegistro(datos);
@@ -842,92 +1128,90 @@
         .registrarMovimiento(datos);
     }
 
-    /**
-     * Muestra el último registro guardado
-     */
     function mostrarUltimoRegistro(datos) {
       var entry = document.getElementById('lastEntry');
       var content = document.getElementById('lastEntryContent');
-
-      var montoFormateado = parseFloat(datos.monto).toLocaleString('es', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+      var m = parseFloat(datos.monto).toLocaleString('es', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
       });
-
-      var html = '<span class="le-amount">$' + montoFormateado + '</span>';
-      html += ' &mdash; ' + datos.categoria;
-      if (datos.subcategoria) {
-        html += ' / ' + datos.subcategoria;
-      }
-      if (datos.descripcion) {
-        html += '<br>' + datos.descripcion;
-      }
-
+      var html = '<span class="le-amount">$' + m + '</span> &mdash; ' + datos.categoria;
+      if (datos.subcategoria) html += ' / ' + datos.subcategoria;
+      if (datos.descripcion) html += '<br>' + datos.descripcion;
       content.innerHTML = html;
       entry.classList.add('visible');
     }
 
-    /**
-     * Limpia el formulario (mantiene la fecha y la categoría)
-     */
     function limpiarFormulario() {
       document.getElementById('monto').value = '';
       document.getElementById('subcategoria').selectedIndex = 0;
       document.getElementById('descripcion').value = '';
       document.getElementById('notas').value = '';
-      // La fecha y la categoría se mantienen para registros consecutivos
+      document.getElementById('grupoElemento').classList.add('hidden');
+      document.getElementById('elemento').innerHTML = '';
     }
 
-    // Limpiar errores al escribir
     document.querySelectorAll('input, select, textarea').forEach(function(el) {
       el.addEventListener('input', function() {
-        this.closest('.form-group').classList.remove('error');
+        var g = this.closest('.form-group');
+        if (g) g.classList.remove('error');
       });
     });
 
     /* ============================================================
-       MODAL DE CONFIGURACIÓN DE SUBCATEGORÍAS
+       MODAL DE CONFIGURACIÓN
        ============================================================ */
 
     function abrirConfig() {
-      renderizarConfig();
+      switchTab('subcategorias');
+      renderizarSubcategorias();
+      renderizarTarjetas();
       document.getElementById('modalConfig').classList.add('open');
     }
 
     function cerrarConfig() {
       document.getElementById('modalConfig').classList.remove('open');
-      // Actualizar dropdown actual con los cambios
-      if (categoriaSeleccionada) {
-        actualizarSubcategorias(categoriaSeleccionada);
-      }
+      if (categoriaSeleccionada) actualizarSubcategorias(categoriaSeleccionada);
     }
 
     function cerrarConfigFondo(e) {
       if (e.target.id === 'modalConfig') cerrarConfig();
     }
 
-    /**
-     * Renderiza el contenido del modal con las subcategorías actuales
-     */
-    function renderizarConfig() {
-      var body = document.getElementById('modalConfigBody');
+    function switchTab(tab) {
+      document.querySelectorAll('.modal-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.tab === tab);
+      });
+      document.getElementById('tabSubcategorias').classList.toggle('active', tab === 'subcategorias');
+      document.getElementById('tabTarjetas').classList.toggle('active', tab === 'tarjetas');
+    }
+
+    /* ============================================================
+       TAB: SUBCATEGORÍAS (con elementos anidados en GF/GV)
+       ============================================================ */
+
+    function renderizarSubcategorias() {
+      var body = document.getElementById('tabSubcategorias');
       body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'En <strong>Gastos Fijos</strong> y <strong>Gastos Variables</strong> puedes expandir una subcategoría para agregar elementos (ej: Suscripciones → Crunchyroll).';
+      body.appendChild(hint);
 
       CATEGORIAS_ORDEN.forEach(function(cat) {
         var bloque = document.createElement('div');
         bloque.className = 'config-category';
 
-        // Título de categoría
         var titulo = document.createElement('div');
         titulo.className = 'config-category-title';
         titulo.style.background = COLORES_CAT[cat];
         titulo.textContent = cat;
         bloque.appendChild(titulo);
 
-        // Lista de subcategorías
         var lista = document.createElement('div');
         lista.className = 'config-subcat-list';
         var subs = subcategorias[cat] || [];
+        var conElementos = CATEGORIAS_CON_ELEMENTOS.indexOf(cat) !== -1;
 
         if (subs.length === 0) {
           var vacio = document.createElement('div');
@@ -936,68 +1220,136 @@
           lista.appendChild(vacio);
         } else {
           subs.forEach(function(sub) {
-            var item = document.createElement('div');
-            item.className = 'config-subcat-item';
-
-            var nombre = document.createElement('span');
-            nombre.textContent = sub;
-            item.appendChild(nombre);
-
-            var btn = document.createElement('button');
-            btn.className = 'config-delete-btn';
-            btn.innerHTML = '&times;';
-            btn.title = 'Eliminar';
-            btn.onclick = function() { eliminarSub(cat, sub); };
-            item.appendChild(btn);
-
-            lista.appendChild(item);
+            lista.appendChild(renderSubcatItem(cat, sub, conElementos));
           });
         }
         bloque.appendChild(lista);
 
-        // Fila para agregar nueva
         var addRow = document.createElement('div');
         addRow.className = 'config-add-row';
-
         var input = document.createElement('input');
         input.type = 'text';
         input.placeholder = 'Nueva subcategoría';
-        input.dataset.cat = cat;
         input.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            agregarSub(cat, input);
-          }
+          if (e.key === 'Enter') { e.preventDefault(); doAgregarSub(cat, input); }
         });
         addRow.appendChild(input);
-
         var btnAdd = document.createElement('button');
         btnAdd.textContent = 'Agregar';
-        btnAdd.onclick = function() { agregarSub(cat, input); };
+        btnAdd.onclick = function() { doAgregarSub(cat, input); };
         addRow.appendChild(btnAdd);
-
         bloque.appendChild(addRow);
+
         body.appendChild(bloque);
       });
     }
 
-    function agregarSub(categoria, input) {
-      var valor = (input.value || '').trim();
-      if (!valor) {
-        input.focus();
-        return;
+    function renderSubcatItem(cat, sub, conElementos) {
+      var item = document.createElement('div');
+      item.className = 'config-subcat-item';
+      var key = cat + '::' + sub;
+      if (subcategoriasExpandidas[key]) item.classList.add('expanded');
+
+      var row = document.createElement('div');
+      row.className = 'config-subcat-row';
+
+      var nameWrap = document.createElement('div');
+      nameWrap.className = 'config-subcat-name' + (conElementos ? ' expandable' : '');
+      if (conElementos) {
+        var chev = document.createElement('span');
+        chev.className = 'config-chevron';
+        chev.textContent = '▶';
+        nameWrap.appendChild(chev);
+      }
+      var nombre = document.createElement('span');
+      nombre.textContent = sub;
+      nameWrap.appendChild(nombre);
+      if (conElementos) {
+        var els = (elementos[cat] && elementos[cat][sub]) || [];
+        if (els.length > 0) {
+          var badge = document.createElement('span');
+          badge.className = 'config-badge';
+          badge.textContent = els.length;
+          nameWrap.appendChild(badge);
+        }
+        nameWrap.onclick = function() {
+          subcategoriasExpandidas[key] = !subcategoriasExpandidas[key];
+          item.classList.toggle('expanded');
+        };
+      }
+      row.appendChild(nameWrap);
+
+      var btnDel = document.createElement('button');
+      btnDel.className = 'config-delete-btn';
+      btnDel.innerHTML = '&times;';
+      btnDel.title = 'Eliminar subcategoría';
+      btnDel.onclick = function(e) {
+        e.stopPropagation();
+        doEliminarSub(cat, sub);
+      };
+      row.appendChild(btnDel);
+
+      item.appendChild(row);
+
+      if (conElementos) {
+        var panel = document.createElement('div');
+        panel.className = 'config-elementos-panel';
+
+        var els = (elementos[cat] && elementos[cat][sub]) || [];
+        if (els.length === 0) {
+          var empty = document.createElement('div');
+          empty.className = 'config-elementos-empty';
+          empty.textContent = 'Sin elementos. Agrega uno abajo.';
+          panel.appendChild(empty);
+        } else {
+          els.forEach(function(el) {
+            var elItem = document.createElement('div');
+            elItem.className = 'config-elemento-item';
+            var s = document.createElement('span');
+            s.textContent = el;
+            elItem.appendChild(s);
+            var db = document.createElement('button');
+            db.className = 'config-delete-btn';
+            db.innerHTML = '&times;';
+            db.title = 'Eliminar elemento';
+            db.onclick = function() { doEliminarElemento(cat, sub, el); };
+            elItem.appendChild(db);
+            panel.appendChild(elItem);
+          });
+        }
+
+        var addEl = document.createElement('div');
+        addEl.className = 'config-elemento-add-row';
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.placeholder = 'Nuevo elemento (ej: Crunchyroll)';
+        inp.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAgregarElemento(cat, sub, inp); }
+        });
+        addEl.appendChild(inp);
+        var btnAddEl = document.createElement('button');
+        btnAddEl.textContent = 'Agregar';
+        btnAddEl.onclick = function() { doAgregarElemento(cat, sub, inp); };
+        addEl.appendChild(btnAddEl);
+        panel.appendChild(addEl);
+
+        item.appendChild(panel);
       }
 
+      return item;
+    }
+
+    function doAgregarSub(categoria, input) {
+      var valor = (input.value || '').trim();
+      if (!valor) { input.focus(); return; }
       input.disabled = true;
 
-      if (typeof google === 'undefined' || !google.script || !google.script.run) {
-        // Preview local
-        if (!subcategorias[categoria].includes(valor)) {
+      if (previewLocal) {
+        if (subcategorias[categoria].indexOf(valor) === -1) {
           subcategorias[categoria].push(valor);
         }
-        input.value = '';
-        input.disabled = false;
-        renderizarConfig();
+        input.value = ''; input.disabled = false;
+        renderizarSubcategorias();
         return;
       }
 
@@ -1007,7 +1359,7 @@
           if (resp.success) {
             subcategorias = resp.subcategorias || subcategorias;
             input.value = '';
-            renderizarConfig();
+            renderizarSubcategorias();
             showToast('Subcategoría agregada', 'success');
           } else {
             showToast(resp.message, 'error');
@@ -1020,15 +1372,13 @@
         .agregarSubcategoria(categoria, valor);
     }
 
-    function eliminarSub(categoria, subcategoria) {
-      if (!confirm('¿Eliminar "' + subcategoria + '" de ' + categoria + '?')) return;
+    function doEliminarSub(categoria, subcategoria) {
+      if (!confirm('¿Eliminar "' + subcategoria + '" de ' + categoria + '?\n\nLos elementos anidados también se pierden del mapeo.')) return;
 
-      if (typeof google === 'undefined' || !google.script || !google.script.run) {
-        // Preview local
-        subcategorias[categoria] = subcategorias[categoria].filter(function(s) {
-          return s !== subcategoria;
-        });
-        renderizarConfig();
+      if (previewLocal) {
+        subcategorias[categoria] = subcategorias[categoria].filter(function(s) { return s !== subcategoria; });
+        if (elementos[categoria]) delete elementos[categoria][subcategoria];
+        renderizarSubcategorias();
         return;
       }
 
@@ -1036,16 +1386,224 @@
         .withSuccessHandler(function(resp) {
           if (resp.success) {
             subcategorias = resp.subcategorias || subcategorias;
-            renderizarConfig();
+            renderizarSubcategorias();
             showToast('Subcategoría eliminada', 'success');
           } else {
             showToast(resp.message, 'error');
           }
         })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .eliminarSubcategoria(categoria, subcategoria);
+    }
+
+    function doAgregarElemento(categoria, subcategoria, input) {
+      var valor = (input.value || '').trim();
+      if (!valor) { input.focus(); return; }
+      input.disabled = true;
+
+      if (previewLocal) {
+        if (!elementos[categoria]) elementos[categoria] = {};
+        if (!elementos[categoria][subcategoria]) elementos[categoria][subcategoria] = [];
+        if (elementos[categoria][subcategoria].indexOf(valor) === -1) {
+          elementos[categoria][subcategoria].push(valor);
+        }
+        input.value = ''; input.disabled = false;
+        subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
+        renderizarSubcategorias();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          input.disabled = false;
+          if (resp.success) {
+            elementos = resp.elementos || elementos;
+            input.value = '';
+            subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
+            renderizarSubcategorias();
+            showToast('Elemento agregado', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
         .withFailureHandler(function(err) {
+          input.disabled = false;
           showToast('Error: ' + err.message, 'error');
         })
-        .eliminarSubcategoria(categoria, subcategoria);
+        .agregarElemento(categoria, subcategoria, valor);
+    }
+
+    function doEliminarElemento(categoria, subcategoria, elemento) {
+      if (!confirm('¿Eliminar el elemento "' + elemento + '"?')) return;
+
+      if (previewLocal) {
+        if (elementos[categoria] && elementos[categoria][subcategoria]) {
+          elementos[categoria][subcategoria] = elementos[categoria][subcategoria].filter(function(e) { return e !== elemento; });
+        }
+        subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
+        renderizarSubcategorias();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            elementos = resp.elementos || elementos;
+            subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
+            renderizarSubcategorias();
+            showToast('Elemento eliminado', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .eliminarElemento(categoria, subcategoria, elemento);
+    }
+
+    /* ============================================================
+       TAB: TARJETAS
+       ============================================================ */
+
+    function renderizarTarjetas() {
+      var body = document.getElementById('tabTarjetas');
+      body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'Los últimos 4 dígitos de cada tarjeta y su tipo. Se usarán cuando la app lea emails del banco para saber si el gasto fue de débito o crédito.';
+      body.appendChild(hint);
+
+      var lista = document.createElement('div');
+      if (tarjetas.length === 0) {
+        var vacio = document.createElement('div');
+        vacio.className = 'config-empty';
+        vacio.textContent = 'Aún no tienes tarjetas registradas.';
+        lista.appendChild(vacio);
+      } else {
+        tarjetas.forEach(function(t) {
+          var item = document.createElement('div');
+          item.className = 'tarjeta-item';
+
+          var info = document.createElement('div');
+          info.className = 'tarjeta-info';
+          var top = document.createElement('div');
+          top.className = 'tarjeta-info-top';
+          var l4 = document.createElement('span');
+          l4.className = 'last4';
+          l4.textContent = '···· ' + t.ultimos4;
+          top.appendChild(l4);
+          if (t.alias) {
+            var alias = document.createElement('span');
+            alias.textContent = t.alias;
+            top.appendChild(alias);
+          }
+          info.appendChild(top);
+          var tipo = document.createElement('div');
+          tipo.className = 'tarjeta-info-tipo ' + (t.tipo === 'Crédito' ? 'credito' : 'debito');
+          tipo.textContent = 'Tarjeta ' + t.tipo;
+          info.appendChild(tipo);
+          item.appendChild(info);
+
+          var btnDel = document.createElement('button');
+          btnDel.className = 'config-delete-btn';
+          btnDel.innerHTML = '&times;';
+          btnDel.title = 'Eliminar';
+          btnDel.onclick = function() { doEliminarTarjeta(t.ultimos4); };
+          item.appendChild(btnDel);
+
+          lista.appendChild(item);
+        });
+      }
+      body.appendChild(lista);
+
+      var form = document.createElement('div');
+      form.className = 'tarjeta-add-form';
+
+      var inpDigits = document.createElement('input');
+      inpDigits.type = 'text';
+      inpDigits.placeholder = '4 dígitos';
+      inpDigits.maxLength = 4;
+      inpDigits.inputMode = 'numeric';
+      form.appendChild(inpDigits);
+
+      var inpAlias = document.createElement('input');
+      inpAlias.type = 'text';
+      inpAlias.placeholder = 'Alias (opcional)';
+      form.appendChild(inpAlias);
+
+      var selTipo = document.createElement('select');
+      ['Crédito', 'Débito'].forEach(function(t) {
+        var opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        selTipo.appendChild(opt);
+      });
+      form.appendChild(selTipo);
+
+      var btn = document.createElement('button');
+      btn.textContent = 'Agregar';
+      btn.onclick = function() { doAgregarTarjeta(inpDigits, selTipo, inpAlias); };
+      form.appendChild(btn);
+
+      body.appendChild(form);
+    }
+
+    function doAgregarTarjeta(inpDigits, selTipo, inpAlias) {
+      var digits = (inpDigits.value || '').trim();
+      var tipo = selTipo.value;
+      var alias = (inpAlias.value || '').trim();
+
+      if (!/^\d{4}$/.test(digits)) {
+        showToast('Los últimos 4 dígitos deben ser 4 números', 'error');
+        inpDigits.focus();
+        return;
+      }
+
+      if (previewLocal) {
+        if (tarjetas.some(function(t) { return t.ultimos4 === digits; })) {
+          showToast('Ya existe esa tarjeta', 'error'); return;
+        }
+        tarjetas.push({ ultimos4: digits, tipo: tipo, alias: alias });
+        inpDigits.value = ''; inpAlias.value = '';
+        renderizarTarjetas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            tarjetas = resp.tarjetas || tarjetas;
+            inpDigits.value = ''; inpAlias.value = '';
+            renderizarTarjetas();
+            showToast('Tarjeta agregada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .agregarTarjeta(digits, tipo, alias);
+    }
+
+    function doEliminarTarjeta(ultimos4) {
+      if (!confirm('¿Eliminar la tarjeta ···· ' + ultimos4 + '?')) return;
+
+      if (previewLocal) {
+        tarjetas = tarjetas.filter(function(t) { return t.ultimos4 !== ultimos4; });
+        renderizarTarjetas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            tarjetas = resp.tarjetas || tarjetas;
+            renderizarTarjetas();
+            showToast('Tarjeta eliminada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .eliminarTarjeta(ultimos4);
     }
   </script>
 

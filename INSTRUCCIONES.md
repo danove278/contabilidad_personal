@@ -62,10 +62,12 @@ Elige **una** de las dos opciones:
    - Selecciona tu cuenta de Google
    - Si aparece "Google no ha verificado esta app", clic en "Avanzado" > "Ir a Registro de Gastos App (no seguro)"
    - Clic en "Permitir"
-4. Esto creará las 3 hojas base:
+4. Esto creará las 5 hojas base:
    - **Hoja del mes actual** (ej: "Abril 2026")
    - **Movimientos** (hoja maestra con todos los registros)
    - **Config** (subcategorías editables desde la app)
+   - **Elementos** (elementos anidados dentro de subcategorías, ej: `Crunchyroll` bajo `Suscripciones`)
+   - **Tarjetas** (últimos 4 dígitos + tipo de cada tarjeta — usada por el autoregistro de emails a partir de v1.4.0)
 
 ## Paso 6: Crear el Dashboard
 
@@ -80,7 +82,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.2.1"
+   - **Descripción:** "Registro de Gastos v1.3.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -93,15 +95,25 @@ Elige **una** de las dos opciones:
 3. Selecciona una categoría, llena los campos y haz clic en **"Registrar"**
 4. Los datos aparecerán automáticamente en tu Google Sheet (en la hoja del mes y en "Movimientos")
 
-### Gestionar subcategorías desde la app
+### Gestionar subcategorías, elementos y tarjetas desde la app
 
-La app tiene un ícono de engranaje **⚙️** en la esquina superior derecha del header. Al hacer clic:
+La app tiene un ícono de engranaje **⚙️** en la esquina superior derecha del header. Al hacer clic se abre un modal con dos pestañas:
 
-- Se abre un modal con **todas las categorías** y sus subcategorías actuales
-- Puedes **agregar** una subcategoría nueva escribiendo en el campo y clic en "Agregar" (o Enter)
-- Puedes **eliminar** una subcategoría con el botón **✕** (pide confirmación)
-- Los cambios se guardan automáticamente en la hoja **Config** del Google Sheet
-- Al cerrar el modal, el dropdown del formulario se actualiza al instante
+**Pestaña "Subcategorías"**
+
+- Muestra **todas las categorías** con sus subcategorías actuales
+- **Agregar** subcategoría: escribe en el campo y clic en "Agregar" (o Enter)
+- **Eliminar** subcategoría: botón **✕** (pide confirmación)
+- En **Gastos Fijos** y **Gastos Variables** cada subcategoría se puede **expandir** (▶) para gestionar sus **elementos** (ej: `Suscripciones → Crunchyroll, Netflix`). El número junto al nombre es la cantidad de elementos
+- Cambios guardados en las hojas **Config** y **Elementos**
+
+**Pestaña "Tarjetas"**
+
+- Registra los **últimos 4 dígitos** de cada tarjeta con su tipo (**Débito** o **Crédito**) y un **alias** opcional (ej: "Chase Sapphire")
+- Estas tarjetas se usarán en v1.4.0 para autoregistrar movimientos leyendo emails del banco
+- Cambios guardados en la hoja **Tarjetas**
+
+**En el formulario:** cuando eliges una subcategoría que tiene elementos configurados, aparece un dropdown **Elemento (opcional)** que autocompleta el campo Descripción al seleccionar uno.
 
 > **Nota:** Después de modificar subcategorías, si quieres que el **Dashboard** refleje los cambios, vuelve a ejecutar `crearDashboard` desde el editor de Apps Script.
 
@@ -146,4 +158,6 @@ Esto crea un ícono como si fuera una app nativa.
 | Enero/Febrero/... 2026 | Registros de ese mes específico |
 | Movimientos | Base de datos completa (alimenta el Dashboard) |
 | Config | Subcategorías editables desde la app |
+| Elementos | Elementos anidados debajo de subcategorías (ej: `Crunchyroll` bajo `Suscripciones`) |
+| Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta |
 | Dashboard | Resumen visual con totales por subcategoría |

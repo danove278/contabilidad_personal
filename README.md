@@ -8,7 +8,7 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
 - **Google Sheets como base de datos**: toda la visualización, análisis y reportes se hacen directamente en la hoja de cálculo
 - **Organización por mes**: cada registro se guarda automáticamente en una hoja separada con el nombre del mes (ej: "Marzo 2026", "Abril 2026")
 - **Hoja Dashboard** con resumen automático: totales del mes, balance y desglose por subcategoría (mes / anual / total histórico)
-- **Gestión de subcategorías desde la app**: ícono ⚙️ en el header para agregar/eliminar subcategorías sin tocar código
+- **Gestión de subcategorías, elementos y tarjetas desde la app**: ícono ⚙️ en el header con dos pestañas — Subcategorías (agregar/eliminar subcategorías, y **elementos** anidados debajo de las de Gastos Fijos/Variables, ej: `Suscripciones → Crunchyroll`) y Tarjetas (últimos 4 dígitos + tipo Débito/Crédito + alias opcional, para el futuro autoregistro de emails del banco)
 - **Autenticación Google**: solo usuarios con cuenta Google pueden acceder
 - **5 categorías con subcategorías editables** (valores iniciales por defecto):
   - Ingresos: Salario, Freelance, Inversiones, Otros
@@ -51,6 +51,8 @@ El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/a
 | Marzo 2026 (y otras por mes) | Ver registros de ese mes específico | **NO** — es tu vista por mes |
 | Movimientos | Base de datos completa (alimenta el Dashboard) | **NO** — la necesita el Dashboard |
 | Config | Subcategorías editables desde la app | **NO** — la usan la app y el Dashboard |
+| Elementos | Elementos anidados debajo de subcategorías (ej: `Crunchyroll` bajo `Suscripciones`) | **NO** — la usa la app y el autoregistro por email |
+| Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta | **NO** — la usará el autoregistro por email |
 | Dashboard | Resumen visual con totales y desglose | **NO** — es tu vista principal |
 
 ### Flujo completo
@@ -59,17 +61,27 @@ El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/a
 2. Se guarda automáticamente en la hoja del mes correspondiente **Y** en "Movimientos"
 3. Abres el Dashboard → seleccionas mes → ves todos los totales y el detalle por subcategoría
 
-### Gestionar subcategorías desde la app
+### Gestionar subcategorías, elementos y tarjetas desde la app
 
-En el header de la app hay un ícono **⚙️ (engranaje)** que abre un modal para administrar subcategorías sin tocar código:
+En el header de la app hay un ícono **⚙️ (engranaje)** que abre un modal con dos pestañas:
 
-- **Agregar**: escribe el nombre en el campo "Nueva subcategoría" y clic en "Agregar" (o Enter)
-- **Eliminar**: clic en el botón **✕** junto a cada subcategoría (pide confirmación)
-- Los cambios se guardan en la hoja **"Config"** del Google Sheet
-- El dropdown del formulario se actualiza automáticamente al cerrar el modal
-- Para que el **Dashboard** refleje los cambios, ejecuta nuevamente `crearDashboard` desde el editor de Apps Script
+**Pestaña "Subcategorías"**
 
-Las subcategorías que elimines **no borran los registros históricos** — esos datos siguen existiendo en las hojas mensuales y en Movimientos.
+- **Agregar subcategoría**: escribe el nombre en "Nueva subcategoría" y clic en "Agregar" (o Enter)
+- **Eliminar subcategoría**: clic en el botón **✕** (pide confirmación)
+- En **Gastos Fijos** y **Gastos Variables** cada subcategoría se puede expandir (▶) para gestionar sus **elementos** anidados (ej: `Suscripciones → Crunchyroll, Netflix, Spotify`)
+- Los elementos aparecen como un dropdown opcional en el formulario cuando eliges una subcategoría que los tenga, y autocompletan la Descripción
+- Los cambios se guardan en las hojas **"Config"** (subcategorías) y **"Elementos"** del Google Sheet
+
+**Pestaña "Tarjetas"**
+
+- Registra los **últimos 4 dígitos** de cada tarjeta, su **tipo** (Débito/Crédito) y un **alias** opcional
+- Estas tarjetas se usarán a partir de v1.4.0 para autoregistrar movimientos leyendo emails del banco (detectar el tipo por los últimos 4 dígitos)
+- Los cambios se guardan en la hoja **"Tarjetas"**
+
+Al cerrar el modal, el dropdown del formulario se actualiza al instante. Para que el **Dashboard** refleje cambios de subcategorías, ejecuta nuevamente `crearDashboard` desde el editor de Apps Script.
+
+Las subcategorías o elementos que elimines **no borran los registros históricos** — esos datos siguen existiendo en las hojas mensuales y en Movimientos.
 
 ## Campos registrados
 
@@ -113,6 +125,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.3.0** — Nueva pestaña **Tarjetas** en el modal ⚙️ (últimos 4 dígitos + Débito/Crédito + alias) y **elementos** anidados dentro de subcategorías de Gastos Fijos/Variables (ej: `Suscripciones → Crunchyroll`). Dropdown de elemento en el formulario que autocompleta la Descripción. Base para el autoregistro automático de emails del banco (v1.4.0)
 - **v1.2.1** — Seguridad: el `SPREADSHEET_ID` se movió del código a **PropertiesService** (Propiedades del script). El repositorio ya no contiene información sensible
 - **v1.2.0** — Gestión de subcategorías desde la app (modal ⚙️) + hoja "Config" para almacenarlas dinámicamente
 - **v1.1.1** — Fix de error en `crearDashboard` y mejoras de documentación

@@ -56,7 +56,16 @@ var HEADERS = [
   'Monto', 'Descripción', 'Método de Pago', 'Notas'
 ];
 
+var HEADERS_TARJETAS = ['Últimos4', 'Tipo', 'Alias'];
+var HEADERS_ELEMENTOS = ['Elemento', 'Categoría', 'Subcategoría'];
+
 var CATEGORIAS = ['Ingresos', 'Ahorro', 'Deudas', 'Gastos Fijos', 'Gastos Variables'];
+
+// Categorías donde tiene sentido tener elementos (comercios/detalles).
+// Los emails del banco solo autoregistran movimientos en estas.
+var CATEGORIAS_CON_ELEMENTOS = ['Gastos Fijos', 'Gastos Variables'];
+
+var TIPOS_TARJETA = ['Débito', 'Crédito'];
 
 // Subcategorías POR DEFECTO (solo se usan la primera vez para inicializar la hoja Config)
 var SUBCATEGORIAS_DEFAULT = {
@@ -225,6 +234,202 @@ function eliminarSubcategoria(categoria, subcategoria) {
   }
 }
 
+/* ============================================================
+   HOJA "Tarjetas" — últimos 4 dígitos y tipo (Débito/Crédito)
+   ============================================================ */
+
+function obtenerHojaTarjetas(ss) {
+  var sheet = ss.getSheetByName('Tarjetas');
+  if (!sheet) {
+    sheet = ss.insertSheet('Tarjetas');
+    sheet.getRange(1, 1, 1, HEADERS_TARJETAS.length).setValues([HEADERS_TARJETAS]);
+    sheet.getRange(1, 1, 1, HEADERS_TARJETAS.length)
+      .setFontWeight('bold').setBackground('#4a90d9').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 120);
+    sheet.setColumnWidth(2, 100);
+    sheet.setColumnWidth(3, 200);
+  }
+  return sheet;
+}
+
+function obtenerTarjetas() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaTarjetas(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_TARJETAS.length).getValues();
+  return data.filter(function(f) { return String(f[0]).trim() !== ''; }).map(function(f) {
+    return {
+      ultimos4: String(f[0]).trim(),
+      tipo: String(f[1]).trim(),
+      alias: String(f[2] || '').trim()
+    };
+  });
+}
+
+function agregarTarjeta(ultimos4, tipo, alias) {
+  try {
+    ultimos4 = String(ultimos4 || '').trim();
+    tipo = String(tipo || '').trim();
+    alias = String(alias || '').trim();
+
+    if (!/^\d{4}$/.test(ultimos4)) {
+      return { success: false, message: 'Los últimos 4 dígitos deben ser exactamente 4 números' };
+    }
+    if (TIPOS_TARJETA.indexOf(tipo) === -1) {
+      return { success: false, message: 'Tipo inválido (usa Débito o Crédito)' };
+    }
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaTarjetas(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === ultimos4) {
+        return { success: false, message: 'Ya existe una tarjeta con esos últimos 4 dígitos' };
+      }
+    }
+
+    sheet.appendRow([ultimos4, tipo, alias]);
+    return { success: true, message: 'Tarjeta agregada', tarjetas: obtenerTarjetas() };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+function eliminarTarjeta(ultimos4) {
+  try {
+    ultimos4 = String(ultimos4 || '').trim();
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaTarjetas(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === ultimos4) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'Tarjeta eliminada', tarjetas: obtenerTarjetas() };
+      }
+    }
+
+    return { success: false, message: 'Tarjeta no encontrada' };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/* ============================================================
+   HOJA "Elementos" — sub-items debajo de una subcategoría
+   (ej: Crunchyroll bajo Gastos Fijos > Suscripciones)
+   ============================================================ */
+
+function obtenerHojaElementos(ss) {
+  var sheet = ss.getSheetByName('Elementos');
+  if (!sheet) {
+    sheet = ss.insertSheet('Elementos');
+    sheet.getRange(1, 1, 1, HEADERS_ELEMENTOS.length).setValues([HEADERS_ELEMENTOS]);
+    sheet.getRange(1, 1, 1, HEADERS_ELEMENTOS.length)
+      .setFontWeight('bold').setBackground('#4a90d9').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 200);
+    sheet.setColumnWidth(2, 180);
+    sheet.setColumnWidth(3, 200);
+  }
+  return sheet;
+}
+
+/**
+ * Retorna elementos agrupados: { categoria: { subcategoria: [elemento, ...] } }
+ */
+function obtenerElementos() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaElementos(ss);
+  var resultado = {};
+  CATEGORIAS_CON_ELEMENTOS.forEach(function(cat) { resultado[cat] = {}; });
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return resultado;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_ELEMENTOS.length).getValues();
+  data.forEach(function(fila) {
+    var elemento = String(fila[0]).trim();
+    var cat = String(fila[1]).trim();
+    var sub = String(fila[2]).trim();
+    if (!elemento || !cat || !sub) return;
+    if (!resultado[cat]) resultado[cat] = {};
+    if (!resultado[cat][sub]) resultado[cat][sub] = [];
+    resultado[cat][sub].push(elemento);
+  });
+  return resultado;
+}
+
+function agregarElemento(categoria, subcategoria, elemento) {
+  try {
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+    elemento = String(elemento || '').trim();
+
+    if (!categoria || !subcategoria || !elemento) {
+      return { success: false, message: 'Faltan datos' };
+    }
+    if (CATEGORIAS_CON_ELEMENTOS.indexOf(categoria) === -1) {
+      return { success: false, message: 'Solo se pueden agregar elementos en Gastos Fijos o Variables' };
+    }
+
+    // Validar que la subcategoría exista en la hoja Config
+    var subs = obtenerSubcategorias();
+    if (!subs[categoria] || subs[categoria].indexOf(subcategoria) === -1) {
+      return { success: false, message: 'La subcategoría no existe' };
+    }
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaElementos(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim().toLowerCase() === elemento.toLowerCase() &&
+          String(data[i][1]).trim() === categoria &&
+          String(data[i][2]).trim() === subcategoria) {
+        return { success: false, message: 'Ese elemento ya existe en esa subcategoría' };
+      }
+    }
+
+    sheet.appendRow([elemento, categoria, subcategoria]);
+    return { success: true, message: 'Elemento agregado', elementos: obtenerElementos() };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+function eliminarElemento(categoria, subcategoria, elemento) {
+  try {
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+    elemento = String(elemento || '').trim();
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaElementos(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === elemento &&
+          String(data[i][1]).trim() === categoria &&
+          String(data[i][2]).trim() === subcategoria) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'Elemento eliminado', elementos: obtenerElementos() };
+      }
+    }
+
+    return { success: false, message: 'Elemento no encontrado' };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
 /**
  * Aplica formato a una hoja nueva
  */
@@ -320,6 +525,8 @@ function configurarHoja() {
   obtenerHojaMes(ss, fechaStr);
   obtenerHojaMovimientos(ss);
   obtenerHojaConfig(ss);
+  obtenerHojaTarjetas(ss);
+  obtenerHojaElementos(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
