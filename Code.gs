@@ -67,6 +67,35 @@ var CATEGORIAS_CON_ELEMENTOS = ['Gastos Fijos', 'Gastos Variables'];
 
 var TIPOS_TARJETA = ['Débito', 'Crédito'];
 
+var HEADERS_PENDIENTES = ['Fecha', 'Monto', 'Elemento (raw)', 'Últimos4', 'Motivo', 'EmailID', 'Thread URL'];
+
+/* ============================================================
+   CONFIGURACIÓN DEL AUTOREGISTRO POR EMAIL
+   ============================================================
+
+   El script SOLO lee los emails que matchean GMAIL_QUERY.
+   Cualquier email fuera de ese query es invisible para el script.
+
+   Para que funcione, DEBES crear en Gmail:
+     1. Un label llamado exactamente "Banco/Alertas"
+     2. Un filtro con "De: no.reply.alerts@chase.com" que aplique
+        ese label automáticamente
+
+   Ver INSTRUCCIONES.md para los pasos exactos.
+   ============================================================ */
+
+var GMAIL_QUERY = 'label:Banco/Alertas is:unread newer_than:7d';
+var LABEL_PROCESADO = 'Banco/Procesado';
+
+// Verificación defensiva del remitente real antes de parsear
+var REMITENTES_PERMITIDOS = ['chase.com'];
+
+// Diccionario para parsear meses abreviados en español (Chase manda en español)
+var MESES_ES_ABR = {
+  ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5,
+  jul: 6, ago: 7, sep: 8, oct: 9, nov: 10, dic: 11
+};
+
 // Subcategorías POR DEFECTO (solo se usan la primera vez para inicializar la hoja Config)
 var SUBCATEGORIAS_DEFAULT = {
   'Ingresos': ['Salario', 'Freelance', 'Inversiones', 'Otros'],
@@ -294,7 +323,14 @@ function agregarTarjeta(ultimos4, tipo, alias) {
     }
 
     sheet.appendRow([ultimos4, tipo, alias]);
-    return { success: true, message: 'Tarjeta agregada', tarjetas: obtenerTarjetas() };
+
+    // Reprocesar pendientes: quizás esta tarjeta desbloquea algunos
+    var pend = { procesados: 0 };
+    try { pend = procesarPendientes(); } catch (e) { /* silencioso */ }
+    var msg = 'Tarjeta agregada';
+    if (pend.procesados > 0) msg += ' — ' + pend.procesados + ' pendiente(s) registrado(s)';
+
+    return { success: true, message: msg, tarjetas: obtenerTarjetas() };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
@@ -399,7 +435,14 @@ function agregarElemento(categoria, subcategoria, elemento) {
     }
 
     sheet.appendRow([elemento, categoria, subcategoria]);
-    return { success: true, message: 'Elemento agregado', elementos: obtenerElementos() };
+
+    // Reprocesar pendientes: quizás este elemento desbloquea algunos
+    var pend = { procesados: 0 };
+    try { pend = procesarPendientes(); } catch (e) { /* silencioso */ }
+    var msg = 'Elemento agregado';
+    if (pend.procesados > 0) msg += ' — ' + pend.procesados + ' pendiente(s) registrado(s)';
+
+    return { success: true, message: msg, elementos: obtenerElementos() };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
@@ -428,6 +471,36 @@ function eliminarElemento(categoria, subcategoria, elemento) {
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
+}
+
+/* ============================================================
+   HOJA "Pendientes" — emails que no se pudieron autoregistrar
+   ============================================================ */
+
+function obtenerHojaPendientes(ss) {
+  var sheet = ss.getSheetByName('Pendientes');
+  if (!sheet) {
+    sheet = ss.insertSheet('Pendientes');
+    sheet.getRange(1, 1, 1, HEADERS_PENDIENTES.length).setValues([HEADERS_PENDIENTES]);
+    sheet.getRange(1, 1, 1, HEADERS_PENDIENTES.length)
+      .setFontWeight('bold').setBackground('#e67e22').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 100);
+    sheet.setColumnWidth(2, 90);
+    sheet.setColumnWidth(3, 220);
+    sheet.setColumnWidth(4, 90);
+    sheet.setColumnWidth(5, 260);
+    sheet.setColumnWidth(6, 200);
+    sheet.setColumnWidth(7, 200);
+  }
+  return sheet;
+}
+
+function contarPendientes() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaPendientes(ss);
+  return Math.max(0, sheet.getLastRow() - 1);
 }
 
 /**
@@ -527,6 +600,7 @@ function configurarHoja() {
   obtenerHojaConfig(ss);
   obtenerHojaTarjetas(ss);
   obtenerHojaElementos(ss);
+  obtenerHojaPendientes(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
@@ -718,4 +792,351 @@ function crearDashboard() {
   ss.setActiveSheet(dash);
 
   Logger.log('Dashboard creado correctamente.');
+}
+
+/* ============================================================
+   AUTOREGISTRO POR EMAIL — Chase
+   ============================================================
+
+   Función principal: procesarEmailsBancarios()  (llamada por trigger)
+   Función manual:    sincronizarAhora()          (llamada desde el frontend)
+   Reprocesar:        procesarPendientes()        (al agregar elemento/tarjeta)
+   Trigger:           crearTriggerEmails() / eliminarTriggerEmails()
+   Test parser:       testParserChase()
+   ============================================================ */
+
+/**
+ * Normaliza un texto: mayúsculas, sin espacios ni puntuación.
+ * Se usa para comparar "CRUNCHYROLL.COM" con "Crunchyroll".
+ */
+function normalizarTexto(t) {
+  return String(t || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * Extrae los campos de interés del cuerpo de un email de Chase.
+ * Devuelve { fecha, elementoRaw, ultimos4, monto } o null si falla.
+ */
+function parsearEmailChase(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+
+  // Monto: primer $NNN.NN encontrado
+  var mMonto = text.match(/\$\s*([\d,]+\.\d{2})/);
+  if (!mMonto) return null;
+  var monto = parseFloat(mMonto[1].replace(/,/g, ''));
+
+  // Últimos 4 dígitos: (...NNNN)
+  var mLast4 = text.match(/\(\s*\.{3}\s*(\d{4})\s*\)/);
+  var ultimos4 = mLast4 ? mLast4[1] : '';
+
+  // Comercio: valor después de "Comercio" hasta salto de línea o "Cantidad"
+  var mComercio = text.match(/Comercio\s*[:\-]?\s*([^\n]+?)(?:\n|Cantidad|$)/i);
+  var elementoRaw = mComercio ? mComercio[1].trim() : '';
+
+  // Fecha: "Fecha ... mmm DD, YYYY ..."
+  var fecha = null;
+  var mFecha = text.match(/Fecha\s*[:\-]?\s*([a-záéíóú]{3,4})\.?\s*(\d{1,2}),?\s*(\d{4})/i);
+  if (mFecha) {
+    var mesStr = mFecha[1].toLowerCase().substring(0, 3);
+    var dia = parseInt(mFecha[2], 10);
+    var anio = parseInt(mFecha[3], 10);
+    var mesNum = MESES_ES_ABR[mesStr];
+    if (mesNum !== undefined && dia && anio) {
+      var mm = ('0' + (mesNum + 1)).slice(-2);
+      var dd = ('0' + dia).slice(-2);
+      fecha = anio + '-' + mm + '-' + dd;
+    }
+  }
+  if (!fecha && emailDate) {
+    fecha = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  if (!elementoRaw || !monto || !fecha) return null;
+
+  return {
+    fecha: fecha,
+    elementoRaw: elementoRaw,
+    ultimos4: ultimos4,
+    monto: monto
+  };
+}
+
+/**
+ * Busca un mapeo elemento → categoría/subcategoría.
+ * Match: si el elemento del catálogo (normalizado) está incluido en el raw (normalizado).
+ * Ej: catálogo "Crunchyroll" + raw "CRUNCHYROLL.COM" → match.
+ */
+function buscarMapeoElemento(elementoRaw) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaElementos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_ELEMENTOS.length).getValues();
+  var rawNorm = normalizarTexto(elementoRaw);
+  if (!rawNorm) return null;
+
+  for (var i = 0; i < data.length; i++) {
+    var elemento = String(data[i][0]).trim();
+    var elemNorm = normalizarTexto(elemento);
+    if (elemNorm && rawNorm.indexOf(elemNorm) !== -1) {
+      return {
+        elemento: elemento,
+        categoria: String(data[i][1]).trim(),
+        subcategoria: String(data[i][2]).trim()
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Busca una tarjeta por sus últimos 4 dígitos.
+ */
+function buscarMapeoTarjeta(ultimos4) {
+  if (!ultimos4) return null;
+  var tarjetas = obtenerTarjetas();
+  for (var i = 0; i < tarjetas.length; i++) {
+    if (tarjetas[i].ultimos4 === ultimos4) return tarjetas[i];
+  }
+  return null;
+}
+
+/**
+ * Agrega una fila a la hoja Pendientes (dedupe por EmailID).
+ */
+function agregarAPendientes(parsed, emailId, threadUrl, motivo) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaPendientes(ss);
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var ids = sheet.getRange(2, 6, lastRow - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === emailId) return; // ya está
+    }
+  }
+
+  var fechaDate = new Date(parsed.fecha + 'T00:00:00');
+  sheet.appendRow([
+    fechaDate,
+    parseFloat(parsed.monto),
+    parsed.elementoRaw,
+    parsed.ultimos4,
+    motivo,
+    emailId,
+    threadUrl || ''
+  ]);
+  var nr = sheet.getLastRow();
+  sheet.getRange(nr, 1).setNumberFormat('dd/MM/yyyy');
+  sheet.getRange(nr, 2).setNumberFormat('$#,##0.00');
+}
+
+/**
+ * Intenta registrar un movimiento parseado. Si falta mapeo → Pendientes.
+ */
+function intentarRegistrar(parsed, emailId, threadUrl) {
+  var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
+  var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
+
+  var motivos = [];
+  if (!mapeoElem) motivos.push('Elemento no mapeado: ' + parsed.elementoRaw);
+  if (!mapeoTarj) motivos.push('Tarjeta desconocida: ...' + (parsed.ultimos4 || '????'));
+
+  if (motivos.length > 0) {
+    agregarAPendientes(parsed, emailId, threadUrl, motivos.join(' | '));
+    return { registrado: false };
+  }
+
+  var alias = mapeoTarj.alias || 'Chase';
+  registrarMovimiento({
+    fecha: parsed.fecha,
+    categoria: mapeoElem.categoria,
+    subcategoria: mapeoElem.subcategoria,
+    monto: parsed.monto,
+    descripcion: mapeoElem.elemento,
+    metodoPago: 'Tarjeta ' + mapeoTarj.tipo,
+    notas: '[Auto] ' + alias + ' ...' + mapeoTarj.ultimos4
+  });
+  return { registrado: true };
+}
+
+/**
+ * Verifica que el "From:" de un mensaje sea un remitente permitido.
+ */
+function esRemitentePermitido(from) {
+  var f = String(from || '').toLowerCase();
+  for (var i = 0; i < REMITENTES_PERMITIDOS.length; i++) {
+    if (f.indexOf(REMITENTES_PERMITIDOS[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function obtenerOCrearLabel(nombre) {
+  var lbl = GmailApp.getUserLabelByName(nombre);
+  if (!lbl) lbl = GmailApp.createLabel(nombre);
+  return lbl;
+}
+
+/**
+ * FUNCIÓN PRINCIPAL — llamada por trigger cada 15 min.
+ * Solo procesa emails que matchean GMAIL_QUERY y vienen de REMITENTES_PERMITIDOS.
+ */
+function procesarEmailsBancarios() {
+  var stats = { total: 0, registrados: 0, pendientes: 0, ignorados: 0 };
+  var threads = GmailApp.search(GMAIL_QUERY, 0, 50);
+  if (!threads.length) return stats;
+
+  var labelProcesado = obtenerOCrearLabel(LABEL_PROCESADO);
+
+  threads.forEach(function(thread) {
+    var messages = thread.getMessages();
+    var procesoAlgunEnEsteThread = false;
+
+    messages.forEach(function(msg) {
+      if (!msg.isUnread()) return;
+      if (!esRemitentePermitido(msg.getFrom())) {
+        stats.ignorados++;
+        return;
+      }
+      stats.total++;
+
+      var parsed = parsearEmailChase(msg.getPlainBody(), msg.getDate());
+      if (!parsed) {
+        stats.ignorados++;
+        return;
+      }
+
+      var res = intentarRegistrar(parsed, msg.getId(), thread.getPermalink());
+      if (res.registrado) stats.registrados++;
+      else stats.pendientes++;
+
+      msg.markRead();
+      procesoAlgunEnEsteThread = true;
+    });
+
+    if (procesoAlgunEnEsteThread) thread.addLabel(labelProcesado);
+  });
+
+  Logger.log('Emails: total=' + stats.total + ' registrados=' + stats.registrados +
+             ' pendientes=' + stats.pendientes + ' ignorados=' + stats.ignorados);
+  return stats;
+}
+
+/**
+ * Reprocesa la hoja Pendientes: los que ahora se pueden mapear, los registra
+ * y borra su fila. Los que no, se quedan.
+ */
+function procesarPendientes() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaPendientes(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { procesados: 0, restantes: 0 };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_PENDIENTES.length).getValues();
+  var registrados = 0;
+  var filasABorrar = [];
+
+  data.forEach(function(fila, i) {
+    var fecha = fila[0];
+    var monto = fila[1];
+    var elementoRaw = String(fila[2] || '').trim();
+    var ultimos4 = String(fila[3] || '').trim();
+
+    var mapeoElem = buscarMapeoElemento(elementoRaw);
+    var mapeoTarj = buscarMapeoTarjeta(ultimos4);
+    if (!mapeoElem || !mapeoTarj) return;
+
+    var fechaStr = fecha instanceof Date
+      ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(fecha);
+    var alias = mapeoTarj.alias || 'Chase';
+
+    registrarMovimiento({
+      fecha: fechaStr,
+      categoria: mapeoElem.categoria,
+      subcategoria: mapeoElem.subcategoria,
+      monto: monto,
+      descripcion: mapeoElem.elemento,
+      metodoPago: 'Tarjeta ' + mapeoTarj.tipo,
+      notas: '[Auto] ' + alias + ' ...' + mapeoTarj.ultimos4
+    });
+    registrados++;
+    filasABorrar.push(i + 2); // +2 porque i=0 corresponde a fila 2
+  });
+
+  filasABorrar.sort(function(a, b) { return b - a; }).forEach(function(row) {
+    sheet.deleteRow(row);
+  });
+
+  return { procesados: registrados, restantes: Math.max(0, sheet.getLastRow() - 1) };
+}
+
+/**
+ * Llamada desde el frontend (botón "Sincronizar ahora").
+ * Procesa emails nuevos y reintenta los pendientes existentes.
+ */
+function sincronizarAhora() {
+  try {
+    var emails = procesarEmailsBancarios();
+    var pend = procesarPendientes();
+    var msg = 'Emails: ' + emails.registrados + ' registrados';
+    if (emails.pendientes > 0) msg += ', ' + emails.pendientes + ' pendientes';
+    if (pend.procesados > 0) msg += ' | Pendientes procesados: ' + pend.procesados;
+    if (emails.registrados === 0 && emails.pendientes === 0 && pend.procesados === 0) {
+      msg = 'Nada nuevo por procesar';
+    }
+    return {
+      success: true,
+      message: msg,
+      pendientesRestantes: pend.restantes
+    };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+/**
+ * Crea el trigger que ejecuta procesarEmailsBancarios cada 15 min.
+ * Ejecuta esta función UNA VEZ desde el editor de Apps Script.
+ */
+function crearTriggerEmails() {
+  eliminarTriggerEmails();
+  ScriptApp.newTrigger('procesarEmailsBancarios')
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+  Logger.log('Trigger creado: procesarEmailsBancarios cada 15 min');
+}
+
+/**
+ * Elimina cualquier trigger de procesarEmailsBancarios existente.
+ */
+function eliminarTriggerEmails() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var count = 0;
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'procesarEmailsBancarios') {
+      ScriptApp.deleteTrigger(t);
+      count++;
+    }
+  });
+  Logger.log('Triggers eliminados: ' + count);
+}
+
+/**
+ * Prueba el parser con el email de ejemplo de Chase.
+ * Ejecuta esta función desde el editor y revisa el Registro.
+ */
+function testParserChase() {
+  var body = 'Alerta de transacción\n\n' +
+             'Hiciste una transacción de $15.83\n\n' +
+             'Estos son los detalles:\n\n' +
+             'Cuenta Chase Sapphire Preferred Visa (...8598)\n' +
+             'Fecha ago 15, 2026 a las 7:06 PM ET\n' +
+             'Comercio CRUNCHYROLL.COM\n' +
+             'Cantidad $15.83';
+  var res = parsearEmailChase(body, new Date());
+  Logger.log('Test parser Chase: ' + JSON.stringify(res));
+  // Esperado: {"fecha":"2026-08-15","elementoRaw":"CRUNCHYROLL.COM","ultimos4":"8598","monto":15.83}
 }

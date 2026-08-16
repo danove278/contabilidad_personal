@@ -62,12 +62,13 @@ Elige **una** de las dos opciones:
    - Selecciona tu cuenta de Google
    - Si aparece "Google no ha verificado esta app", clic en "Avanzado" > "Ir a Registro de Gastos App (no seguro)"
    - Clic en "Permitir"
-4. Esto creará las 5 hojas base:
+4. Esto creará las 6 hojas base:
    - **Hoja del mes actual** (ej: "Abril 2026")
    - **Movimientos** (hoja maestra con todos los registros)
    - **Config** (subcategorías editables desde la app)
    - **Elementos** (elementos anidados dentro de subcategorías, ej: `Crunchyroll` bajo `Suscripciones`)
-   - **Tarjetas** (últimos 4 dígitos + tipo de cada tarjeta — usada por el autoregistro de emails a partir de v1.4.0)
+   - **Tarjetas** (últimos 4 dígitos + tipo de cada tarjeta — usada por el autoregistro de emails)
+   - **Pendientes** (cola del autoregistro por email — emails que faltan mapear)
 
 ## Paso 6: Crear el Dashboard
 
@@ -82,7 +83,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.3.0"
+   - **Descripción:** "Registro de Gastos v1.4.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -116,6 +117,77 @@ La app tiene un ícono de engranaje **⚙️** en la esquina superior derecha de
 **En el formulario:** cuando eliges una subcategoría que tiene elementos configurados, aparece un dropdown **Elemento (opcional)** que autocompleta el campo Descripción al seleccionar uno.
 
 > **Nota:** Después de modificar subcategorías, si quieres que el **Dashboard** refleje los cambios, vuelve a ejecutar `crearDashboard` desde el editor de Apps Script.
+
+## Configurar el autoregistro desde emails de Chase (v1.4.0)
+
+El script puede leer los emails de "Alerta de transacción" de Chase y registrar los movimientos solo. **Por privacidad, el script SOLO lee emails con el label `Banco/Alertas`** — cualquier otro email es invisible para el código.
+
+### Paso A — Crear el label y filtro en Gmail (una sola vez)
+
+1. Abre [Gmail](https://mail.google.com)
+2. En la barra lateral izquierda, baja hasta **"Más"** → **"Crear etiqueta nueva"** (o **"Crear nueva etiqueta"**)
+3. Nombre exacto: **`Banco/Alertas`** (con la barra `/` — Gmail lo interpreta como subcarpeta)
+4. Clic en **Crear**
+
+Ahora el filtro:
+
+1. En la barra de búsqueda de Gmail, clic en el ícono de filtro **⚙️** (a la derecha del buscador) → aparece el formulario "Filtrar por"
+2. En el campo **De:** pon: `no.reply.alerts@chase.com`
+3. Clic en **Crear filtro** (abajo a la derecha)
+4. Marca **✔ Aplicar la etiqueta:** y elige **`Banco/Alertas`** en el dropdown
+5. (Opcional, recomendado) marca también **✔ Marcar como importante** para verlos rápido
+6. Clic en **Crear filtro**
+
+A partir de ahora, cualquier email de `no.reply.alerts@chase.com` se etiqueta automáticamente. El script solo consulta esa etiqueta.
+
+### Paso B — Preparar tus tarjetas y elementos en la app
+
+Antes de que el autoregistro haga su magia, necesita mapeos:
+
+1. Abre la Web App → ícono ⚙️ → pestaña **Tarjetas**: agrega tus tarjetas de Chase con los últimos 4 dígitos, tipo (Débito/Crédito) y alias (ej: "Chase Sapphire")
+2. Pestaña **Subcategorías**: en Gastos Fijos / Gastos Variables, expande cada subcategoría (▶) y agrega los **elementos** que uses (ej: bajo `Suscripciones` agrega `Crunchyroll`, `Netflix`, `Spotify`)
+
+**Reglas de mapeo:**
+- El elemento del email (ej: `CRUNCHYROLL.COM`) se cruza contra tu catálogo por **inclusión sin espacios/mayúsculas**. Si tienes `Crunchyroll` en la hoja Elementos, matches con `CRUNCHYROLL.COM`, `Crunchyroll TX 4234`, etc.
+- Los últimos 4 dígitos son match **exacto**
+
+Si un email llega y **no** encuentra el elemento o la tarjeta, va a la hoja **Pendientes** — no se pierde. Cuando agregas lo faltante desde la app, la app **reprocesa automáticamente** los pendientes.
+
+### Paso C — Activar el trigger automático
+
+Esto hace que la app revise Gmail cada 15 minutos, sin abrirla:
+
+1. En Apps Script, en el dropdown de funciones selecciona **`crearTriggerEmails`**
+2. Clic en **Ejecutar**
+3. Autoriza los permisos (te va a pedir acceso a Gmail — es necesario para leer los emails etiquetados)
+4. En el Registro debe salir: `Trigger creado: procesarEmailsBancarios cada 15 min`
+
+Verificación: en la barra lateral izquierda de Apps Script, clic en **⏰ Activadores**. Debes ver una entrada de `procesarEmailsBancarios` cada 15 minutos.
+
+Para desactivar: ejecuta `eliminarTriggerEmails` desde el mismo dropdown.
+
+### Paso D — Probar el parser antes de esperar un email real
+
+En Apps Script, selecciona **`testParserChase`** en el dropdown → **Ejecutar** → revisa el Registro.
+
+Debe imprimir algo parecido a:
+```
+{"fecha":"2026-08-15","elementoRaw":"CRUNCHYROLL.COM","ultimos4":"8598","monto":15.83}
+```
+
+Si sale eso, el parser funciona. Si sale `null`, algo cambió en el formato del email — avísame.
+
+### Paso E — Sincronización manual
+
+En la app: ícono ⚙️ → pestaña **Emails** → botón **Sincronizar ahora**. Útil para no esperar al trigger cuando acabas de hacer un gasto y quieres verlo aparecer ya.
+
+### Qué hacer con los Pendientes
+
+Si en la pestaña **Emails** ves un badge naranja con un número, hay emails que no se pudieron mapear. Ábre la hoja **Pendientes** del Google Sheet para ver el detalle. El motivo te dice qué falta:
+- `Elemento no mapeado: XXX` → agrega ese elemento (o uno cuyo nombre esté incluido en el raw) en la pestaña Subcategorías
+- `Tarjeta desconocida: ...NNNN` → agrega esa tarjeta en la pestaña Tarjetas
+
+En cuanto guardes lo que falta, se registra solo y desaparece de Pendientes.
 
 ## Actualizar la aplicación
 
@@ -160,4 +232,5 @@ Esto crea un ícono como si fuera una app nativa.
 | Config | Subcategorías editables desde la app |
 | Elementos | Elementos anidados debajo de subcategorías (ej: `Crunchyroll` bajo `Suscripciones`) |
 | Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta |
+| Pendientes | Cola del autoregistro por email — se procesa sola al agregar lo faltante |
 | Dashboard | Resumen visual con totales por subcategoría |

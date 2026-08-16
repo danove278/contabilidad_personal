@@ -735,6 +735,125 @@
       line-height: 1.4;
     }
 
+    .tab-badge {
+      display: inline-block;
+      background: var(--warning);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 4px;
+      min-width: 18px;
+      vertical-align: middle;
+    }
+
+    /* Sección Emails */
+    .emails-status {
+      display: flex;
+      justify-content: space-around;
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .emails-stat {
+      text-align: center;
+    }
+
+    .emails-stat-number {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .emails-stat-number.warn { color: var(--warning); }
+
+    .emails-stat-label {
+      font-size: 11px;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    .btn-sync {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      color: white;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 14px;
+    }
+
+    .btn-sync:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(74,144,217,0.25);
+    }
+
+    .btn-sync:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-sync.loading {
+      position: relative;
+      color: transparent;
+    }
+
+    .btn-sync.loading::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 20px; height: 20px;
+      margin: -10px 0 0 -10px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    .emails-help {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.5;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .emails-help h4 {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--primary);
+    }
+
+    .emails-help ol {
+      padding-left: 20px;
+      margin: 6px 0;
+    }
+
+    .emails-help li {
+      margin-bottom: 4px;
+    }
+
+    .emails-help code {
+      background: rgba(74,144,217,0.12);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 12px;
+    }
+
     /* Responsive */
     @media (max-width: 400px) {
       .form-row {
@@ -778,10 +897,14 @@
       <div class="modal-tabs">
         <button class="modal-tab active" data-tab="subcategorias" onclick="switchTab('subcategorias')">Subcategorías</button>
         <button class="modal-tab" data-tab="tarjetas" onclick="switchTab('tarjetas')">Tarjetas</button>
+        <button class="modal-tab" data-tab="emails" onclick="switchTab('emails')">
+          Emails <span class="tab-badge" id="tabEmailsBadge" style="display:none;">0</span>
+        </button>
       </div>
       <div class="modal-body">
         <div class="tab-panel active" id="tabSubcategorias"></div>
         <div class="tab-panel" id="tabTarjetas"></div>
+        <div class="tab-panel" id="tabEmails"></div>
       </div>
     </div>
   </div>
@@ -902,6 +1025,8 @@
     // [{ ultimos4, tipo, alias }]
     var tarjetas = [];
 
+    var pendientesCount = 0;
+
     var subcategoriasExpandidas = {};  // ej: {'Gastos Fijos::Suscripciones': true}
 
     var previewLocal = (typeof google === 'undefined' || !google.script || !google.script.run);
@@ -953,6 +1078,21 @@
         .withSuccessHandler(function(data) { if (data) tarjetas = data; })
         .withFailureHandler(function(err) { console.error('tarjetas:', err); })
         .obtenerTarjetas();
+
+      google.script.run
+        .withSuccessHandler(function(n) { pendientesCount = n || 0; actualizarBadgeEmails(); })
+        .withFailureHandler(function(err) { console.error('pendientes:', err); })
+        .contarPendientes();
+    }
+
+    function actualizarBadgeEmails() {
+      var badge = document.getElementById('tabEmailsBadge');
+      if (pendientesCount > 0) {
+        badge.textContent = pendientesCount;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
     }
 
     cargarDatos();
@@ -1165,6 +1305,7 @@
       switchTab('subcategorias');
       renderizarSubcategorias();
       renderizarTarjetas();
+      renderizarEmails();
       document.getElementById('modalConfig').classList.add('open');
     }
 
@@ -1183,6 +1324,7 @@
       });
       document.getElementById('tabSubcategorias').classList.toggle('active', tab === 'subcategorias');
       document.getElementById('tabTarjetas').classList.toggle('active', tab === 'tarjetas');
+      document.getElementById('tabEmails').classList.toggle('active', tab === 'emails');
     }
 
     /* ============================================================
@@ -1604,6 +1746,88 @@
         })
         .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
         .eliminarTarjeta(ultimos4);
+    }
+
+    /* ============================================================
+       TAB: EMAILS (autoregistro desde Chase)
+       ============================================================ */
+
+    function renderizarEmails() {
+      var body = document.getElementById('tabEmails');
+      body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'El script solo lee emails con el label <code>Banco/Alertas</code>. Cualquier otro email es invisible para la app.';
+      body.appendChild(hint);
+
+      var status = document.createElement('div');
+      status.className = 'emails-status';
+      status.innerHTML =
+        '<div class="emails-stat">' +
+          '<div class="emails-stat-number ' + (pendientesCount > 0 ? 'warn' : '') + '" id="statPendientes">' + pendientesCount + '</div>' +
+          '<div class="emails-stat-label">Pendientes</div>' +
+        '</div>' +
+        '<div class="emails-stat">' +
+          '<div class="emails-stat-number">' + tarjetas.length + '</div>' +
+          '<div class="emails-stat-label">Tarjetas</div>' +
+        '</div>';
+      body.appendChild(status);
+
+      var btn = document.createElement('button');
+      btn.className = 'btn-sync';
+      btn.id = 'btnSync';
+      btn.textContent = 'Sincronizar ahora';
+      btn.onclick = doSincronizar;
+      body.appendChild(btn);
+
+      var help = document.createElement('div');
+      help.className = 'emails-help';
+      help.innerHTML =
+        '<h4>Configuración inicial (una sola vez)</h4>' +
+        '<ol>' +
+          '<li>En Gmail crea el label <code>Banco/Alertas</code>.</li>' +
+          '<li>Crea un filtro con <code>De: no.reply.alerts@chase.com</code> que aplique ese label.</li>' +
+          '<li>En Apps Script ejecuta <code>crearTriggerEmails()</code> para que se sincronice cada 15 min automáticamente.</li>' +
+        '</ol>' +
+        '<div style="margin-top:8px;font-size:12px;color:var(--text-light);">Los pendientes se resuelven agregando el elemento o la tarjeta faltante en las otras pestañas — se registran solos.</div>';
+      body.appendChild(help);
+    }
+
+    function doSincronizar() {
+      var btn = document.getElementById('btnSync');
+      btn.disabled = true;
+      btn.classList.add('loading');
+
+      if (previewLocal) {
+        setTimeout(function() {
+          btn.disabled = false;
+          btn.classList.remove('loading');
+          showToast('Preview local: no hay backend', 'error');
+        }, 500);
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          btn.disabled = false;
+          btn.classList.remove('loading');
+          if (resp.success) {
+            pendientesCount = resp.pendientesRestantes || 0;
+            actualizarBadgeEmails();
+            renderizarEmails();
+            switchTab('emails');
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.classList.remove('loading');
+          showToast('Error: ' + err.message, 'error');
+        })
+        .sincronizarAhora();
     }
   </script>
 

@@ -18,6 +18,7 @@ Aplicación web para el registro de movimientos financieros personales (ingresos
   - Gastos Variables: Comida, Entretenimiento, Ropa, Salud, Educación
 - **Métodos de pago**: Efectivo, Tarjeta Débito, Tarjeta Crédito, Transferencia, Otro
 - **Sin secretos en el código**: el ID del Google Sheet se guarda en las **Propiedades del script** de Apps Script, no en el repositorio. El código fuente puede publicarse en GitHub público sin exponer nada de tus datos
+- **Autoregistro desde emails del banco** (Chase): la app lee automáticamente los emails de alerta de transacción de Chase y los registra en la hoja. Solo lee los emails con el label `Banco/Alertas` que tú configuras — cualquier otro email es invisible para el script
 
 ## Arquitectura
 
@@ -52,7 +53,8 @@ El **Dashboard** lee de "Movimientos" y te muestra el resumen filtrado por mes/a
 | Movimientos | Base de datos completa (alimenta el Dashboard) | **NO** — la necesita el Dashboard |
 | Config | Subcategorías editables desde la app | **NO** — la usan la app y el Dashboard |
 | Elementos | Elementos anidados debajo de subcategorías (ej: `Crunchyroll` bajo `Suscripciones`) | **NO** — la usa la app y el autoregistro por email |
-| Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta | **NO** — la usará el autoregistro por email |
+| Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta | **NO** — la usa el autoregistro por email |
+| Pendientes | Emails que se leyeron pero no se pudieron mapear (elemento nuevo o tarjeta desconocida). Se procesan solos cuando agregas lo faltante | **NO** — es la cola del autoregistro |
 | Dashboard | Resumen visual con totales y desglose | **NO** — es tu vista principal |
 
 ### Flujo completo
@@ -82,6 +84,21 @@ En el header de la app hay un ícono **⚙️ (engranaje)** que abre un modal co
 Al cerrar el modal, el dropdown del formulario se actualiza al instante. Para que el **Dashboard** refleje cambios de subcategorías, ejecuta nuevamente `crearDashboard` desde el editor de Apps Script.
 
 Las subcategorías o elementos que elimines **no borran los registros históricos** — esos datos siguen existiendo en las hojas mensuales y en Movimientos.
+
+### Autoregistro automático desde emails de Chase (v1.4.0)
+
+Cuando Chase te manda un email de "Alerta de transacción", el script:
+
+1. Lo lee (solo si tiene el label `Banco/Alertas` — configuración de Gmail, ver [INSTRUCCIONES.md](INSTRUCCIONES.md))
+2. Extrae **monto**, **comercio** y **últimos 4 dígitos**
+3. Busca el comercio en tu hoja **Elementos** (ej: `CRUNCHYROLL.COM` → `Crunchyroll` → `Gastos Fijos / Suscripciones`)
+4. Busca los últimos 4 dígitos en tu hoja **Tarjetas** para saber si fue **Débito o Crédito**
+5. Si todo mapea → **registra el movimiento solo** (con nota `[Auto] Chase ...8598`)
+6. Si falta algo → lo deja en la hoja **Pendientes**. Cuando agregas el elemento o la tarjeta desde el modal ⚙️, se registra solo
+
+El script se ejecuta cada 15 minutos vía trigger (activar con `crearTriggerEmails()` desde el editor). También puedes forzar la sincronización en cualquier momento desde la pestaña **Emails** del modal ⚙️.
+
+**Privacidad:** el script SOLO consulta emails con el label `Banco/Alertas`. Cualquier email fuera de ese label es invisible para el código (el query se ve en `Code.gs`, constante `GMAIL_QUERY`).
 
 ## Campos registrados
 
@@ -125,6 +142,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.4.0** — **Autoregistro desde emails de Chase**. Parser de "Alerta de transacción", cruce con hojas Elementos + Tarjetas, hoja **Pendientes** para mapeos faltantes que se resuelven solos al agregar el elemento/tarjeta, trigger automático cada 15 min y botón manual **"Sincronizar ahora"** en nueva pestaña **Emails** del modal ⚙️. Privacidad por diseño: el script solo consulta emails con label `Banco/Alertas`
 - **v1.3.0** — Nueva pestaña **Tarjetas** en el modal ⚙️ (últimos 4 dígitos + Débito/Crédito + alias) y **elementos** anidados dentro de subcategorías de Gastos Fijos/Variables (ej: `Suscripciones → Crunchyroll`). Dropdown de elemento en el formulario que autocompleta la Descripción. Base para el autoregistro automático de emails del banco (v1.4.0)
 - **v1.2.1** — Seguridad: el `SPREADSHEET_ID` se movió del código a **PropertiesService** (Propiedades del script). El repositorio ya no contiene información sensible
 - **v1.2.0** — Gestión de subcategorías desde la app (modal ⚙️) + hoja "Config" para almacenarlas dinámicamente
