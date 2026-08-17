@@ -85,7 +85,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.7.0"
+   - **Descripción:** "Registro de Gastos v1.8.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -243,6 +243,56 @@ Cada mañana, el trigger revisa las deudas activas:
 
 - Clic en ✏️ de la tarjeta → puedes cambiar monto/pago/día y **pausar** (des-marcar "Deuda activa") sin borrar el historial
 - Clic en ✕ → elimina la deuda del catálogo. **Los pagos históricos ya registrados NO se borran** (siguen en Movimientos)
+
+## Transferencias de Chase (v1.8.0)
+
+Chase manda emails de "Alerta de transferencia" cuando envías dinero (a otra cuenta, a Zelle, a pago de tarjeta de otro banco, a la renta, etc). La app los detecta y los registra como movimientos.
+
+### Formato del email
+
+```
+Enviaste $44.00 a WF CREDIT CARD
+Cuenta que termina en    (...8310)
+Destinatario             WF CREDIT CARD
+Enviado en               ago 10, 2026 a las 5:03 AM ET
+Cantidad                 $44.00
+```
+
+### Cómo se procesa
+
+1. Llega email → parser detecta `Enviaste $X a Y`
+2. Busca `Y` en la hoja **Elementos** (mismo mecanismo que las transacciones de tarjeta)
+3. Si encuentra → registra el movimiento en esa categoría/subcategoría con **método Transferencia** y descripción = nombre del elemento
+4. Si NO encuentra → va a **Pendientes** con motivo "Transferencia sin mapeo: DESTINATARIO"
+
+### Configuración
+
+Para cada destinatario típico, agrega un **elemento** en la app:
+
+- **Renta**: en `Gastos Fijos → Alquiler` agrega elemento con el nombre del landlord tal como aparece en Chase (ej: `LANDLORD JOHN DOE`)
+- **Pago tarjeta de otro banco**: en `Gastos Fijos → Pago Deuda` agrega elemento con el nombre exacto (ej: `WF CREDIT CARD`)
+- **Zelle a personas**: en `Gastos Variables → [subcategoría]` agrega elemento con el nombre del destinatario
+
+Si el destinatario no está mapeado, la transferencia va a Pendientes hasta que agregues el elemento.
+
+### Vincular a una Deuda (opcional)
+
+En cada deuda puedes configurar un **"Destinatario Chase"**. Cuando llegue una transferencia a ese destinatario:
+
+- Se registra como movimiento (por el elemento matcheado)
+- Se **actualiza el saldo** de la deuda automáticamente (`Pagado` += monto, `Restante` -= monto)
+- Si `Restante` llega a 0, la deuda se marca inactiva
+
+**Deudas con destinatario configurado saltan el trigger diario** — el email real es la fuente de la verdad, evita doble contabilización.
+
+Ejemplo: deuda "Wells Fargo negocio" con Destinatario = `WF CREDIT CARD`. Cada vez que envíes cualquier monto a esa tarjeta desde Chase, la deuda se descuenta sola. El pago mensual configurado se vuelve informativo.
+
+### Test del parser
+
+En Apps Script, ejecuta `testParserChaseTransferencia` — debe imprimir:
+```
+{"fecha":"2026-08-10","elementoRaw":"WF CREDIT CARD","ultimos4":"8310","monto":44,"esTransferencia":true}
+```
 
 ## Chase 4 Pagos (v1.7.0)
 

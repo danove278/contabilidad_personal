@@ -69,7 +69,7 @@ var TIPOS_TARJETA = ['Débito', 'Crédito'];
 
 var HEADERS_PENDIENTES = ['Fecha', 'Monto', 'Elemento (raw)', 'Últimos4', 'Motivo', 'EmailID', 'Thread URL'];
 
-var HEADERS_DEUDAS = ['Descripción', 'Monto original', 'Pagado', 'Restante', 'Pago mensual', 'Día del mes', 'Activa', 'Último pago'];
+var HEADERS_DEUDAS = ['Descripción', 'Monto original', 'Pagado', 'Restante', 'Pago mensual', 'Día del mes', 'Activa', 'Último pago', 'Destinatario'];
 
 // Destino automático de los pagos mensuales de deudas
 var CATEGORIA_PAGO_DEUDA = 'Gastos Fijos';
@@ -1148,6 +1148,126 @@ function parsearEmailChase(body, emailDate) {
 }
 
 /**
+ * Parser del email de TRANSFERENCIA de Chase.
+ * Formato: "Enviaste $XX.XX a DESTINATARIO"
+ * Retorna { fecha, elementoRaw, ultimos4, monto, esTransferencia } o null.
+ */
+function parsearEmailChaseTransferencia(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+
+  // Header: "Enviaste $XX.XX a DESTINATARIO"
+  var mHeader = text.match(/Enviaste\s+\$\s*([\d,]+\.\d{2})\s+a\s+([^\n]+?)(?:\n|Cuenta|$)/i);
+  if (!mHeader) return null;
+
+  var monto = parseFloat(mHeader[1].replace(/,/g, ''));
+  var destinatario = mHeader[2].trim();
+
+  // Cuenta origen "(...NNNN)"
+  var mCuenta = text.match(/\(\s*\.{3}\s*(\d{4})\s*\)/);
+  var ultimos4 = mCuenta ? mCuenta[1] : '';
+
+  // Fecha: "Enviado en" mes DD, YYYY
+  var fecha = null;
+  var mFecha = text.match(/(?:Enviado en|Enviado el)\s*[:\-]?\s*([a-záéíóú]{3,4})\.?\s*(\d{1,2}),?\s*(\d{4})/i);
+  if (mFecha) {
+    var mesStr = mFecha[1].toLowerCase().substring(0, 3);
+    var dia = parseInt(mFecha[2], 10);
+    var anio = parseInt(mFecha[3], 10);
+    var mesNum = MESES_ES_ABR[mesStr];
+    if (mesNum !== undefined && dia && anio) {
+      fecha = anio + '-' + ('0' + (mesNum + 1)).slice(-2) + '-' + ('0' + dia).slice(-2);
+    }
+  }
+  if (!fecha && emailDate) {
+    fecha = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  if (!monto || !destinatario || !fecha) return null;
+
+  return {
+    fecha: fecha,
+    elementoRaw: destinatario,
+    ultimos4: ultimos4,
+    monto: monto,
+    esTransferencia: true
+  };
+}
+
+/**
+ * Registra una transferencia. Diferencias con intentarRegistrar normal:
+ *   - Método pago = "Transferencia"
+ *   - No requiere match de tarjeta (una transferencia no es un cargo a tarjeta)
+ *   - Después de registrar, actualiza el saldo de una deuda si el destinatario
+ *     matchea el campo "Destinatario" de alguna deuda
+ */
+function intentarRegistrarTransferencia(parsed, emailId, threadUrl) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
+  var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
+  if (!mapeoElem) {
+    agregarAPendientes(parsed, emailId, threadUrl,
+      'Transferencia sin mapeo: ' + parsed.elementoRaw + ' (crea un elemento con este nombre)');
+    return { registrado: false };
+  }
+
+  registrarMovimiento({
+    fecha: parsed.fecha,
+    categoria: mapeoElem.categoria,
+    subcategoria: mapeoElem.subcategoria,
+    monto: parsed.monto,
+    descripcion: mapeoElem.elemento,
+    metodoPago: 'Transferencia',
+    notas: '[Auto Transfer] Cuenta ...' + parsed.ultimos4
+  });
+
+  // Auto-actualizar saldo de deuda si aplica
+  _actualizarDeudaPorDestinatario(parsed.elementoRaw, parsed.monto);
+
+  if (emailId) marcarEmailProcesado(emailId);
+  return { registrado: true };
+}
+
+/**
+ * Si el destinatario matchea el campo "Destinatario" de alguna deuda,
+ * actualiza Pagado y Restante. Match exacto (trim + case-insensitive).
+ */
+function _actualizarDeudaPorDestinatario(destinatario, monto) {
+  try {
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaDeudas(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+
+    var destLower = String(destinatario || '').trim().toLowerCase();
+    if (!destLower) return;
+
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_DEUDAS.length).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var deudaDest = String(data[i][8] || '').trim().toLowerCase();
+      if (!deudaDest || deudaDest !== destLower) continue;
+
+      var montoOriginal = parseFloat(data[i][1]) || 0;
+      var pagadoActual = parseFloat(data[i][2]) || 0;
+      var activa = String(data[i][6]).trim() === 'Sí';
+      if (!activa) return;
+
+      var nuevoPagado = pagadoActual + monto;
+      var nuevoRestante = montoOriginal - nuevoPagado;
+
+      sheet.getRange(i + 2, 3).setValue(nuevoPagado);
+      sheet.getRange(i + 2, 4).setValue(nuevoRestante);
+      sheet.getRange(i + 2, 8).setValue(new Date());
+      if (nuevoRestante <= 0) sheet.getRange(i + 2, 7).setValue('No');
+      return;
+    }
+  } catch (e) {
+    Logger.log('Error actualizando deuda por destinatario: ' + e.message);
+  }
+}
+
+/**
  * Busca un mapeo elemento → categoría/subcategoría.
  * Match: si el elemento del catálogo (normalizado) está incluido en el raw (normalizado).
  * Ej: catálogo "Crunchyroll" + raw "CRUNCHYROLL.COM" → match.
@@ -1316,7 +1436,19 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 2) Parser Chase 4 Pagos - setup (agrega a la queue)
+        // 2) Parser transferencia ("Enviaste $X a Y")
+        var transfer = parsearEmailChaseTransferencia(body, msg.getDate());
+        if (transfer) {
+          var resT = intentarRegistrarTransferencia(transfer, msg.getId(), thread.getPermalink());
+          if (resT.registrado) stats.registrados++;
+          else if (resT.yaProcesado) stats.ignorados++;
+          else stats.pendientes++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
+        // 3) Parser Chase 4 Pagos - setup (agrega a la queue)
         var setup4p = parsearEmailChase4PagosSetup(body);
         if (setup4p && setup4p.numeroPlan) {
           agregar4Pagos(setup4p, msg.getId(), msg.getDate());
@@ -1506,6 +1638,21 @@ function testParserChaseDebito() {
   // Esperado: {"fecha":"2026-08-15","elementoRaw":"MY SUNNY LAUNDRY","ultimos4":"8310","monto":31.20}
 }
 
+/**
+ * Prueba el parser de transferencias de Chase.
+ */
+function testParserChaseTransferencia() {
+  var body = 'Alerta de transferencia\n\n' +
+             'Enviaste $44.00 a WF CREDIT CARD\n\n' +
+             'Cuenta que termina en (...8310)\n' +
+             'Destinatario WF CREDIT CARD\n' +
+             'Enviado en ago 10, 2026 a las 5:03 AM ET\n' +
+             'Cantidad $44.00';
+  var res = parsearEmailChaseTransferencia(body, new Date());
+  Logger.log('Test parser Chase (transferencia): ' + JSON.stringify(res));
+  // Esperado: {"fecha":"2026-08-10","elementoRaw":"WF CREDIT CARD","ultimos4":"8310","monto":44,"esTransferencia":true}
+}
+
 /* ============================================================
    DEUDAS ROTATIVAS — pagos mensuales automáticos
    ============================================================
@@ -1540,6 +1687,16 @@ function obtenerHojaDeudas(ss) {
     sheet.setColumnWidth(6, 100); // Día del mes
     sheet.setColumnWidth(7, 80);  // Activa
     sheet.setColumnWidth(8, 120); // Último pago
+    sheet.setColumnWidth(9, 180); // Destinatario
+  } else {
+    // Auto-migración: agregar columna Destinatario si falta (v1.8.0)
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < HEADERS_DEUDAS.length) {
+      sheet.getRange(1, HEADERS_DEUDAS.length).setValue('Destinatario')
+        .setFontWeight('bold').setBackground('#e74c3c').setFontColor('white')
+        .setHorizontalAlignment('center');
+      sheet.setColumnWidth(9, 180);
+    }
   }
   return sheet;
 }
@@ -1564,7 +1721,8 @@ function obtenerDeudas() {
       activa: String(fila[6]).trim() === 'Sí',
       ultimoPago: fila[7] instanceof Date
         ? Utilities.formatDate(fila[7], Session.getScriptTimeZone(), 'yyyy-MM-dd')
-        : ''
+        : '',
+      destinatario: String(fila[8] || '').trim()
     });
   });
   return resultado;
@@ -1588,12 +1746,13 @@ function _asegurarSubcategoriaPagoDeuda() {
   _refreshDashboardSilencioso();
 }
 
-function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes) {
+function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, destinatario) {
   try {
     descripcion = String(descripcion || '').trim();
     montoOriginal = parseFloat(montoOriginal);
     pagoMensual = parseFloat(pagoMensual);
     diaMes = parseInt(diaMes, 10);
+    destinatario = String(destinatario || '').trim();
 
     if (!descripcion) return { success: false, message: 'Falta descripción' };
     if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
@@ -1611,7 +1770,7 @@ function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes) {
 
     _asegurarSubcategoriaPagoDeuda();
 
-    sheet.appendRow([descripcion, montoOriginal, 0, montoOriginal, pagoMensual, diaMes, 'Sí', '']);
+    sheet.appendRow([descripcion, montoOriginal, 0, montoOriginal, pagoMensual, diaMes, 'Sí', '', destinatario]);
     var nr = sheet.getLastRow();
     sheet.getRange(nr, 2).setNumberFormat('$#,##0.00');
     sheet.getRange(nr, 3).setNumberFormat('$#,##0.00');
@@ -1625,12 +1784,13 @@ function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes) {
   }
 }
 
-function actualizarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, activa) {
+function actualizarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, activa, destinatario) {
   try {
     descripcion = String(descripcion || '').trim();
     montoOriginal = parseFloat(montoOriginal);
     pagoMensual = parseFloat(pagoMensual);
     diaMes = parseInt(diaMes, 10);
+    destinatario = String(destinatario || '').trim();
 
     if (!descripcion) return { success: false, message: 'Falta descripción' };
     if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
@@ -1644,10 +1804,11 @@ function actualizarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, activa
       if (String(data[i][0]).trim() === descripcion) {
         var pagado = parseFloat(data[i][2]) || 0;
         sheet.getRange(i + 1, 2).setValue(montoOriginal);
-        sheet.getRange(i + 1, 4).setValue(montoOriginal - pagado); // recalcular restante
+        sheet.getRange(i + 1, 4).setValue(montoOriginal - pagado);
         sheet.getRange(i + 1, 5).setValue(pagoMensual);
         sheet.getRange(i + 1, 6).setValue(diaMes);
         sheet.getRange(i + 1, 7).setValue(activa ? 'Sí' : 'No');
+        sheet.getRange(i + 1, 9).setValue(destinatario);
         return { success: true, message: 'Deuda actualizada', deudas: obtenerDeudas() };
       }
     }
@@ -1714,8 +1875,12 @@ function procesarPagosDeudas() {
       var diaMes = parseInt(fila[5], 10) || 1;
       var activa = String(fila[6]).trim() === 'Sí';
       var ultimoPago = fila[7] instanceof Date ? fila[7] : null;
+      var destinatario = String(fila[8] || '').trim();
 
       if (!descripcion || !activa) return;
+      // Si la deuda está vinculada a un destinatario de transfer, el email
+      // real es la fuente de la verdad. Este trigger no genera nada.
+      if (destinatario) return;
       if (restante <= 0) {
         sheet.getRange(i + 2, 7).setValue('No');
         return;

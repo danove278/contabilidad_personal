@@ -2342,6 +2342,12 @@
 
       form.appendChild(row);
 
+      var inpDest = document.createElement('input');
+      inpDest.type = 'text';
+      inpDest.placeholder = 'Destinatario Chase (opcional, ej: WF CREDIT CARD)';
+      inpDest.style.marginTop = '8px';
+      form.appendChild(inpDest);
+
       var btn = document.createElement('button');
       btn.textContent = 'Agregar deuda';
       btn.className = 'btn-regen-dashboard';
@@ -2350,7 +2356,7 @@
       btn.style.background = 'var(--primary)';
       btn.style.color = 'white';
       btn.style.borderColor = 'var(--primary)';
-      btn.onclick = function() { doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia); };
+      btn.onclick = function() { doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia, inpDest); };
       form.appendChild(btn);
 
       body.appendChild(form);
@@ -2417,8 +2423,12 @@
 
       var meta = document.createElement('div');
       meta.className = 'deuda-meta';
-      meta.innerHTML = 'Pago mensual: <strong>' + formatUSD(d.pagoMensual) + '</strong> · Día <strong>' + d.diaMes + '</strong>' +
+      var metaHtml = 'Pago mensual: <strong>' + formatUSD(d.pagoMensual) + '</strong> · Día <strong>' + d.diaMes + '</strong>' +
         (d.ultimoPago ? ' · Último pago ' + d.ultimoPago : '');
+      if (d.destinatario) {
+        metaHtml += '<br><span style="color:var(--primary);">🔗 Vinculada a transferencia: <strong>' + d.destinatario + '</strong></span>';
+      }
+      meta.innerHTML = metaHtml;
       item.appendChild(meta);
 
       return item;
@@ -2467,6 +2477,13 @@
       row.appendChild(inpDia);
       cardEl.appendChild(row);
 
+      var inpDest = document.createElement('input');
+      inpDest.type = 'text';
+      inpDest.value = d.destinatario || '';
+      inpDest.placeholder = 'Destinatario Chase (opcional, ej: WF CREDIT CARD)';
+      inpDest.style.marginTop = '8px';
+      cardEl.appendChild(inpDest);
+
       var activaWrap = document.createElement('label');
       activaWrap.style.display = 'flex';
       activaWrap.style.alignItems = 'center';
@@ -2479,7 +2496,7 @@
       chkActiva.style.width = 'auto';
       chkActiva.style.margin = '0';
       activaWrap.appendChild(chkActiva);
-      activaWrap.appendChild(document.createTextNode('Deuda activa (genera pagos mensuales)'));
+      activaWrap.appendChild(document.createTextNode('Deuda activa'));
       cardEl.appendChild(activaWrap);
 
       var actions = document.createElement('div');
@@ -2493,7 +2510,8 @@
           inpMonto.value,
           inpMens.value,
           inpDia.value,
-          chkActiva.checked
+          chkActiva.checked,
+          inpDest.value
         );
       };
       var cancel = document.createElement('button');
@@ -2509,11 +2527,12 @@
       cardEl.appendChild(actions);
     }
 
-    function doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia) {
+    function doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia, inpDest) {
       var desc = (inpDesc.value || '').trim();
       var monto = parseFloat(inpMonto.value);
       var mens = parseFloat(inpMens.value);
       var dia = parseInt(inpDia.value, 10);
+      var dest = inpDest ? (inpDest.value || '').trim() : '';
       if (!desc) { showToast('Falta descripción', 'error'); inpDesc.focus(); return; }
       if (!monto || monto <= 0) { showToast('Monto inválido', 'error'); inpMonto.focus(); return; }
       if (!mens || mens <= 0) { showToast('Pago mensual inválido', 'error'); inpMens.focus(); return; }
@@ -2522,7 +2541,7 @@
       if (previewLocal) {
         deudas.push({
           descripcion: desc, montoOriginal: monto, pagado: 0, restante: monto,
-          pagoMensual: mens, diaMes: dia, activa: true, ultimoPago: ''
+          pagoMensual: mens, diaMes: dia, activa: true, ultimoPago: '', destinatario: dest
         });
         renderizarDeudas();
         return;
@@ -2539,10 +2558,11 @@
           }
         })
         .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
-        .agregarDeuda(desc, monto, mens, dia);
+        .agregarDeuda(desc, monto, mens, dia, dest);
     }
 
-    function doActualizarDeuda(desc, monto, mens, dia, activa) {
+    function doActualizarDeuda(desc, monto, mens, dia, activa, destinatario) {
+      var dest = (destinatario || '').trim();
       if (previewLocal) {
         for (var i = 0; i < deudas.length; i++) {
           if (deudas[i].descripcion === desc) {
@@ -2551,6 +2571,7 @@
             deudas[i].pagoMensual = parseFloat(mens);
             deudas[i].diaMes = parseInt(dia, 10);
             deudas[i].activa = !!activa;
+            deudas[i].destinatario = dest;
             break;
           }
         }
@@ -2569,7 +2590,7 @@
           }
         })
         .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
-        .actualizarDeuda(desc, monto, mens, dia, activa);
+        .actualizarDeuda(desc, monto, mens, dia, activa, dest);
     }
 
     function doEliminarDeuda(desc) {
