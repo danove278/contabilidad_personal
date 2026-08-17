@@ -142,6 +142,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.5.0** — **Renombrar** subcategorías, elementos y tarjetas desde el modal ⚙️ (ícono ✏️ inline, guardar con Enter o ✓, cancelar con Esc o ✕). Los renames de subcategoría y elemento **actualizan también los movimientos históricos** para mantener consistencia con el Dashboard. El **Dashboard se regenera automáticamente** tras cambios en subcategorías (agregar/eliminar/renombrar). Nuevo botón **"Regenerar Dashboard"** en el modal para forzarlo cuando quieras
 - **v1.4.3** — Fix de **duplicados por race condition**: `procesarEmailsBancarios` y `procesarPendientes` ahora usan `LockService` para serializar ejecuciones concurrentes (aparecían duplicados cuando se agregaban tarjeta + elemento casi al mismo tiempo). Defensa en profundidad: dedup por **EmailID** vía Propiedades del script (ventana rodante de 200 IDs procesados)
 - **v1.4.2** — El bot ahora usa la **ausencia del label `Banco/Procesado`** como criterio de "email pendiente", en vez de `is:unread`. Antes, abrir un email en Gmail lo sacaba del pipeline; ahora solo el bot puede marcarlo como procesado (aplicando el label). El `newer_than:7d` sigue limitando el alcance a la última semana
 - **v1.4.1** — El parser de Chase ahora también entiende emails de **tarjeta de débito** ("Realizaste una transacción con tarjeta de débito de $NN.NN con MERCHANT" + "Realizada el" en lugar de "Fecha"). Los emails de débito que ya habían llegado antes se reprocesan solos al sincronizar

@@ -234,9 +234,30 @@ function agregarSubcategoria(categoria, subcategoria) {
     }
 
     sheet.appendRow([categoria, subcategoria]);
+    _refreshDashboardSilencioso();
     return { success: true, message: 'Subcategoría agregada', subcategorias: obtenerSubcategorias() };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/**
+ * Intenta regenerar el Dashboard. Si falla, no propaga el error
+ * (la operación principal ya se hizo, no queremos perder el trabajo).
+ */
+function _refreshDashboardSilencioso() {
+  try { crearDashboard(); } catch (e) { Logger.log('Dashboard refresh falló: ' + e.message); }
+}
+
+/**
+ * Regenera el Dashboard bajo demanda (llamado desde el frontend).
+ */
+function regenerarDashboard() {
+  try {
+    crearDashboard();
+    return { success: true, message: 'Dashboard regenerado' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
   }
 }
 
@@ -256,6 +277,7 @@ function eliminarSubcategoria(categoria, subcategoria) {
       if (String(data[i][0]).trim() === categoria &&
           String(data[i][1]).trim() === subcategoria) {
         sheet.deleteRow(i + 1);
+        _refreshDashboardSilencioso();
         return { success: true, message: 'Subcategoría eliminada', subcategorias: obtenerSubcategorias() };
       }
     }
@@ -264,6 +286,100 @@ function eliminarSubcategoria(categoria, subcategoria) {
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
+}
+
+/**
+ * Renombra una subcategoría en Config, Elementos y todos los Movimientos históricos.
+ * Actualiza el Dashboard al final.
+ */
+function renombrarSubcategoria(categoria, subOld, subNew) {
+  try {
+    categoria = String(categoria || '').trim();
+    subOld = String(subOld || '').trim();
+    subNew = String(subNew || '').trim();
+
+    if (!categoria || !subOld || !subNew) return { success: false, message: 'Faltan datos' };
+    if (subOld === subNew) return { success: false, message: 'El nombre no cambió' };
+    if (CATEGORIAS.indexOf(categoria) === -1) return { success: false, message: 'Categoría no válida' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var config = obtenerHojaConfig(ss);
+    var data = config.getDataRange().getValues();
+
+    var filaOld = -1;
+    for (var i = 1; i < data.length; i++) {
+      var c = String(data[i][0]).trim();
+      var s = String(data[i][1]).trim();
+      if (c === categoria && s === subOld) filaOld = i;
+      if (c === categoria && s.toLowerCase() === subNew.toLowerCase() && s !== subOld) {
+        return { success: false, message: 'Ya existe una subcategoría con ese nombre' };
+      }
+    }
+    if (filaOld === -1) return { success: false, message: 'Subcategoría no encontrada' };
+
+    // Actualizar Config
+    config.getRange(filaOld + 1, 2).setValue(subNew);
+
+    // Actualizar Elementos (columna Subcategoría = índice 2)
+    var elem = obtenerHojaElementos(ss);
+    var eLast = elem.getLastRow();
+    if (eLast >= 2) {
+      var eData = elem.getRange(2, 1, eLast - 1, HEADERS_ELEMENTOS.length).getValues();
+      var eChanges = 0;
+      eData.forEach(function(fila) {
+        if (String(fila[1]).trim() === categoria && String(fila[2]).trim() === subOld) {
+          fila[2] = subNew;
+          eChanges++;
+        }
+      });
+      if (eChanges > 0) elem.getRange(2, 1, eLast - 1, HEADERS_ELEMENTOS.length).setValues(eData);
+    }
+
+    // Actualizar Movimientos + hojas mensuales
+    var actualizadosMov = _actualizarSubcategoriaEnMovimientos(categoria, subOld, subNew);
+
+    _refreshDashboardSilencioso();
+    return {
+      success: true,
+      message: 'Renombrada — ' + actualizadosMov + ' movimiento(s) actualizado(s)',
+      subcategorias: obtenerSubcategorias()
+    };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/**
+ * Actualiza la columna Subcategoría en Movimientos y en cada hoja mensual.
+ * Retorna el total de filas modificadas.
+ */
+function _actualizarSubcategoriaEnMovimientos(categoria, subOld, subNew) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheets = ss.getSheets();
+  var total = 0;
+  sheets.forEach(function(sh) {
+    var nombre = sh.getName();
+    var esMovOMes = nombre === 'Movimientos' ||
+      MESES.some(function(m) { return nombre.indexOf(m + ' ') === 0; });
+    if (!esMovOMes) return;
+    var last = sh.getLastRow();
+    if (last < 2) return;
+    // Columnas C=Categoría (3), D=Subcategoría (4)
+    var rng = sh.getRange(2, 3, last - 1, 2);
+    var data = rng.getValues();
+    var changes = 0;
+    data.forEach(function(fila) {
+      if (String(fila[0]).trim() === categoria && String(fila[1]).trim() === subOld) {
+        fila[1] = subNew;
+        changes++;
+      }
+    });
+    if (changes > 0) {
+      rng.setValues(data);
+      total += changes;
+    }
+  });
+  return total;
 }
 
 /* ============================================================
@@ -354,6 +470,36 @@ function eliminarTarjeta(ultimos4) {
       }
     }
 
+    return { success: false, message: 'Tarjeta no encontrada' };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/**
+ * Actualiza tipo y alias de una tarjeta (identificada por últimos4).
+ * No toca Movimientos históricos (el alias en Notas es informativo).
+ */
+function renombrarTarjeta(ultimos4, tipoNuevo, aliasNuevo) {
+  try {
+    ultimos4 = String(ultimos4 || '').trim();
+    tipoNuevo = String(tipoNuevo || '').trim();
+    aliasNuevo = String(aliasNuevo || '').trim();
+
+    if (!ultimos4) return { success: false, message: 'Faltan datos' };
+    if (TIPOS_TARJETA.indexOf(tipoNuevo) === -1) return { success: false, message: 'Tipo no válido' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaTarjetas(ss);
+    var data = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === ultimos4) {
+        sheet.getRange(i + 1, 2).setValue(tipoNuevo);
+        sheet.getRange(i + 1, 3).setValue(aliasNuevo);
+        return { success: true, message: 'Tarjeta actualizada', tarjetas: obtenerTarjetas() };
+      }
+    }
     return { success: false, message: 'Tarjeta no encontrada' };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
@@ -474,6 +620,89 @@ function eliminarElemento(categoria, subcategoria, elemento) {
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
+}
+
+/**
+ * Renombra un elemento en la hoja Elementos y en los Movimientos históricos
+ * (solo aquellos donde la descripción coincide exactamente con el nombre viejo).
+ */
+function renombrarElemento(categoria, subcategoria, elemOld, elemNew) {
+  try {
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+    elemOld = String(elemOld || '').trim();
+    elemNew = String(elemNew || '').trim();
+
+    if (!categoria || !subcategoria || !elemOld || !elemNew) {
+      return { success: false, message: 'Faltan datos' };
+    }
+    if (elemOld === elemNew) return { success: false, message: 'El nombre no cambió' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaElementos(ss);
+    var data = sheet.getDataRange().getValues();
+
+    var filaOld = -1;
+    for (var i = 1; i < data.length; i++) {
+      var e = String(data[i][0]).trim();
+      var c = String(data[i][1]).trim();
+      var s = String(data[i][2]).trim();
+      if (c === categoria && s === subcategoria && e === elemOld) filaOld = i;
+      if (c === categoria && s === subcategoria &&
+          e.toLowerCase() === elemNew.toLowerCase() && e !== elemOld) {
+        return { success: false, message: 'Ya existe un elemento con ese nombre' };
+      }
+    }
+    if (filaOld === -1) return { success: false, message: 'Elemento no encontrado' };
+
+    sheet.getRange(filaOld + 1, 1).setValue(elemNew);
+
+    var actualizados = _actualizarDescripcionEnMovimientos(categoria, subcategoria, elemOld, elemNew);
+
+    return {
+      success: true,
+      message: 'Renombrado — ' + actualizados + ' movimiento(s) actualizado(s)',
+      elementos: obtenerElementos()
+    };
+  } catch (error) {
+    return { success: false, message: 'Error: ' + error.message };
+  }
+}
+
+/**
+ * Actualiza Movimientos.Descripción para las filas que matchean cat + sub + descripcion=elemOld.
+ * Match case-insensitive en descripción para tolerar variaciones.
+ */
+function _actualizarDescripcionEnMovimientos(categoria, subcategoria, elemOld, elemNew) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheets = ss.getSheets();
+  var elemOldLower = elemOld.toLowerCase();
+  var total = 0;
+  sheets.forEach(function(sh) {
+    var nombre = sh.getName();
+    var esMovOMes = nombre === 'Movimientos' ||
+      MESES.some(function(m) { return nombre.indexOf(m + ' ') === 0; });
+    if (!esMovOMes) return;
+    var last = sh.getLastRow();
+    if (last < 2) return;
+    // C=Categoría (3), D=Subcategoría (4), F=Descripción (6). Leemos C..F.
+    var rng = sh.getRange(2, 3, last - 1, 4);
+    var data = rng.getValues();
+    var changes = 0;
+    data.forEach(function(fila) {
+      if (String(fila[0]).trim() === categoria &&
+          String(fila[1]).trim() === subcategoria &&
+          String(fila[3]).trim().toLowerCase() === elemOldLower) {
+        fila[3] = elemNew;
+        changes++;
+      }
+    });
+    if (changes > 0) {
+      rng.setValues(data);
+      total += changes;
+    }
+  });
+  return total;
 }
 
 /* ============================================================

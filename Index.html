@@ -599,6 +599,97 @@
 
     .config-delete-btn:hover { background: rgba(231,76,60,0.1); }
 
+    .config-item-actions {
+      display: flex;
+      gap: 2px;
+      align-items: center;
+    }
+
+    .config-edit-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 6px;
+      font-size: 13px;
+      line-height: 1;
+      opacity: 0.55;
+      transition: opacity 0.15s;
+      border-radius: 6px;
+    }
+
+    .config-edit-btn:hover { opacity: 1; background: rgba(74,144,217,0.1); }
+
+    .config-item-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .config-inline-input {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 8px;
+      border: 2px solid var(--primary);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      background: white;
+    }
+
+    .config-inline-input:focus { outline: none; }
+
+    .config-inline-save,
+    .config-inline-cancel {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 15px;
+      line-height: 1;
+      font-weight: 700;
+    }
+
+    .config-inline-save { color: var(--success); }
+    .config-inline-save:hover { background: rgba(39,174,96,0.12); }
+    .config-inline-cancel { color: var(--text-light); }
+    .config-inline-cancel:hover { background: rgba(0,0,0,0.05); }
+
+    .btn-regen-dashboard {
+      width: 100%;
+      padding: 10px;
+      margin-top: 12px;
+      background: white;
+      color: var(--primary);
+      border: 2px dashed var(--primary);
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-regen-dashboard:hover { background: rgba(74,144,217,0.05); }
+    .btn-regen-dashboard:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-regen-dashboard.loading {
+      position: relative;
+      color: transparent;
+    }
+    .btn-regen-dashboard.loading::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 18px; height: 18px;
+      margin: -9px 0 0 -9px;
+      border: 3px solid rgba(74,144,217,0.25);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
     .config-add-row {
       display: flex;
       gap: 6px;
@@ -1328,6 +1419,65 @@
     }
 
     /* ============================================================
+       Helper de edición inline reutilizable
+       ============================================================ */
+
+    /**
+     * Convierte una fila (row) en un input inline con botones ✓ / ✕.
+     * onSave(valorNuevo) → callback si el usuario guarda con un valor distinto.
+     * onCancel() → callback opcional al cancelar (por defecto, re-renderiza).
+     */
+    function activarEdicionInline(container, valorActual, onSave, onCancel) {
+      var innerBackup = container.innerHTML;
+      container.innerHTML = '';
+
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'config-inline-input';
+      input.value = valorActual;
+
+      var acciones = document.createElement('div');
+      acciones.className = 'config-item-actions';
+
+      var save = document.createElement('button');
+      save.className = 'config-inline-save';
+      save.innerHTML = '&#10003;';
+      save.title = 'Guardar';
+
+      var cancel = document.createElement('button');
+      cancel.className = 'config-inline-cancel';
+      cancel.innerHTML = '&times;';
+      cancel.title = 'Cancelar';
+
+      acciones.appendChild(save);
+      acciones.appendChild(cancel);
+
+      container.appendChild(input);
+      container.appendChild(acciones);
+
+      function commit() {
+        var v = (input.value || '').trim();
+        if (!v || v === valorActual) {
+          if (onCancel) onCancel(); else container.innerHTML = innerBackup;
+          return;
+        }
+        onSave(v);
+      }
+      function abortar() {
+        if (onCancel) onCancel(); else container.innerHTML = innerBackup;
+      }
+
+      save.onclick = commit;
+      cancel.onclick = abortar;
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); abortar(); }
+      });
+
+      setTimeout(function() { input.focus(); input.select(); }, 10);
+    }
+
+    /* ============================================================
        TAB: SUBCATEGORÍAS (con elementos anidados en GF/GV)
        ============================================================ */
 
@@ -1384,6 +1534,13 @@
 
         body.appendChild(bloque);
       });
+
+      var btnRegen = document.createElement('button');
+      btnRegen.className = 'btn-regen-dashboard';
+      btnRegen.textContent = 'Regenerar Dashboard';
+      btnRegen.title = 'Rebuilds la hoja Dashboard con las subcategorías actuales';
+      btnRegen.onclick = function() { doRegenerarDashboard(btnRegen); };
+      body.appendChild(btnRegen);
     }
 
     function renderSubcatItem(cat, sub, conElementos) {
@@ -1421,6 +1578,21 @@
       }
       row.appendChild(nameWrap);
 
+      var acciones = document.createElement('div');
+      acciones.className = 'config-item-actions';
+
+      var btnEdit = document.createElement('button');
+      btnEdit.className = 'config-edit-btn';
+      btnEdit.innerHTML = '&#9998;';
+      btnEdit.title = 'Renombrar subcategoría';
+      btnEdit.onclick = function(e) {
+        e.stopPropagation();
+        activarEdicionInline(row, sub, function(subNuevo) {
+          doRenombrarSub(cat, sub, subNuevo);
+        }, function() { renderizarSubcategorias(); });
+      };
+      acciones.appendChild(btnEdit);
+
       var btnDel = document.createElement('button');
       btnDel.className = 'config-delete-btn';
       btnDel.innerHTML = '&times;';
@@ -1429,7 +1601,8 @@
         e.stopPropagation();
         doEliminarSub(cat, sub);
       };
-      row.appendChild(btnDel);
+      acciones.appendChild(btnDel);
+      row.appendChild(acciones);
 
       item.appendChild(row);
 
@@ -1448,14 +1621,32 @@
             var elItem = document.createElement('div');
             elItem.className = 'config-elemento-item';
             var s = document.createElement('span');
+            s.className = 'config-item-name';
             s.textContent = el;
             elItem.appendChild(s);
+
+            var acc = document.createElement('div');
+            acc.className = 'config-item-actions';
+
+            var eb = document.createElement('button');
+            eb.className = 'config-edit-btn';
+            eb.innerHTML = '&#9998;';
+            eb.title = 'Renombrar elemento';
+            eb.onclick = function() {
+              activarEdicionInline(elItem, el, function(elNuevo) {
+                doRenombrarElemento(cat, sub, el, elNuevo);
+              }, function() { renderizarSubcategorias(); });
+            };
+            acc.appendChild(eb);
+
             var db = document.createElement('button');
             db.className = 'config-delete-btn';
             db.innerHTML = '&times;';
             db.title = 'Eliminar elemento';
             db.onclick = function() { doEliminarElemento(cat, sub, el); };
-            elItem.appendChild(db);
+            acc.appendChild(db);
+
+            elItem.appendChild(acc);
             panel.appendChild(elItem);
           });
         }
@@ -1646,12 +1837,24 @@
           info.appendChild(tipo);
           item.appendChild(info);
 
+          var acc = document.createElement('div');
+          acc.className = 'config-item-actions';
+
+          var btnEdit = document.createElement('button');
+          btnEdit.className = 'config-edit-btn';
+          btnEdit.innerHTML = '&#9998;';
+          btnEdit.title = 'Editar alias/tipo';
+          btnEdit.onclick = function() { abrirEdicionTarjeta(t); };
+          acc.appendChild(btnEdit);
+
           var btnDel = document.createElement('button');
           btnDel.className = 'config-delete-btn';
           btnDel.innerHTML = '&times;';
           btnDel.title = 'Eliminar';
           btnDel.onclick = function() { doEliminarTarjeta(t.ultimos4); };
-          item.appendChild(btnDel);
+          acc.appendChild(btnDel);
+
+          item.appendChild(acc);
 
           lista.appendChild(item);
         });
@@ -1746,6 +1949,134 @@
         })
         .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
         .eliminarTarjeta(ultimos4);
+    }
+
+    /* ============================================================
+       RENOMBRAR (subcategorías / elementos / tarjetas)
+       ============================================================ */
+
+    function doRenombrarSub(cat, subOld, subNew) {
+      if (previewLocal) {
+        var idx = subcategorias[cat].indexOf(subOld);
+        if (idx !== -1) subcategorias[cat][idx] = subNew;
+        if (elementos[cat] && elementos[cat][subOld]) {
+          elementos[cat][subNew] = elementos[cat][subOld];
+          delete elementos[cat][subOld];
+        }
+        renderizarSubcategorias();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            subcategorias = resp.subcategorias || subcategorias;
+            // rename bucket in local elementos state
+            if (elementos[cat] && elementos[cat][subOld]) {
+              elementos[cat][subNew] = elementos[cat][subOld];
+              delete elementos[cat][subOld];
+            }
+            renderizarSubcategorias();
+            showToast(resp.message, 'success');
+          } else {
+            renderizarSubcategorias();
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          renderizarSubcategorias();
+          showToast('Error: ' + err.message, 'error');
+        })
+        .renombrarSubcategoria(cat, subOld, subNew);
+    }
+
+    function doRenombrarElemento(cat, sub, elemOld, elemNew) {
+      if (previewLocal) {
+        if (elementos[cat] && elementos[cat][sub]) {
+          var i = elementos[cat][sub].indexOf(elemOld);
+          if (i !== -1) elementos[cat][sub][i] = elemNew;
+        }
+        subcategoriasExpandidas[cat + '::' + sub] = true;
+        renderizarSubcategorias();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            elementos = resp.elementos || elementos;
+            subcategoriasExpandidas[cat + '::' + sub] = true;
+            renderizarSubcategorias();
+            showToast(resp.message, 'success');
+          } else {
+            renderizarSubcategorias();
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          renderizarSubcategorias();
+          showToast('Error: ' + err.message, 'error');
+        })
+        .renombrarElemento(cat, sub, elemOld, elemNew);
+    }
+
+    function abrirEdicionTarjeta(t) {
+      var aliasNuevo = prompt('Alias para la tarjeta ···· ' + t.ultimos4 + ':', t.alias || '');
+      if (aliasNuevo === null) return;
+      var tipoNuevo = prompt('Tipo (Débito o Crédito):', t.tipo);
+      if (tipoNuevo === null) return;
+      tipoNuevo = tipoNuevo.trim();
+      if (tipoNuevo !== 'Débito' && tipoNuevo !== 'Crédito') {
+        showToast('Tipo inválido: usa "Débito" o "Crédito"', 'error');
+        return;
+      }
+      if (aliasNuevo.trim() === (t.alias || '') && tipoNuevo === t.tipo) return;
+
+      if (previewLocal) {
+        t.alias = aliasNuevo.trim();
+        t.tipo = tipoNuevo;
+        renderizarTarjetas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            tarjetas = resp.tarjetas || tarjetas;
+            renderizarTarjetas();
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .renombrarTarjeta(t.ultimos4, tipoNuevo, aliasNuevo.trim());
+    }
+
+    /* ============================================================
+       REGENERAR DASHBOARD
+       ============================================================ */
+
+    function doRegenerarDashboard(btn) {
+      if (previewLocal) {
+        showToast('Preview local: no hay backend', 'error');
+        return;
+      }
+      btn.disabled = true;
+      btn.classList.add('loading');
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          btn.disabled = false;
+          btn.classList.remove('loading');
+          if (resp.success) showToast(resp.message, 'success');
+          else showToast(resp.message, 'error');
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.classList.remove('loading');
+          showToast('Error: ' + err.message, 'error');
+        })
+        .regenerarDashboard();
     }
 
     /* ============================================================
