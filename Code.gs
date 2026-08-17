@@ -69,6 +69,12 @@ var TIPOS_TARJETA = ['Débito', 'Crédito'];
 
 var HEADERS_PENDIENTES = ['Fecha', 'Monto', 'Elemento (raw)', 'Últimos4', 'Motivo', 'EmailID', 'Thread URL'];
 
+var HEADERS_DEUDAS = ['Descripción', 'Monto original', 'Pagado', 'Restante', 'Pago mensual', 'Día del mes', 'Activa', 'Último pago'];
+
+// Destino automático de los pagos mensuales de deudas
+var CATEGORIA_PAGO_DEUDA = 'Gastos Fijos';
+var SUBCAT_PAGO_DEUDA = 'Pago Deuda';
+
 /* ============================================================
    CONFIGURACIÓN DEL AUTOREGISTRO POR EMAIL
    ============================================================
@@ -833,6 +839,7 @@ function configurarHoja() {
   obtenerHojaTarjetas(ss);
   obtenerHojaElementos(ss);
   obtenerHojaPendientes(ss);
+  obtenerHojaDeudas(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
@@ -1465,4 +1472,276 @@ function testParserChaseDebito() {
   var res = parsearEmailChase(body, new Date());
   Logger.log('Test parser Chase (débito): ' + JSON.stringify(res));
   // Esperado: {"fecha":"2026-08-15","elementoRaw":"MY SUNNY LAUNDRY","ultimos4":"8310","monto":31.20}
+}
+
+/* ============================================================
+   DEUDAS ROTATIVAS — pagos mensuales automáticos
+   ============================================================
+
+   Función diaria: procesarPagosDeudas()   (trigger)
+   CRUD:           obtenerDeudas / agregarDeuda / actualizarDeuda / eliminarDeuda
+   Trigger:        crearTriggerDeudas / eliminarTriggerDeudas
+
+   Al agregar una deuda se asegura que exista la subcategoría
+   "Pago Deuda" en Gastos Fijos (la crea si falta).
+   El trigger corre 1 vez al día. Para cada deuda activa cuyo
+   "día del mes" coincida con hoy y aún no se haya pagado este mes,
+   registra un movimiento en Gastos Fijos → Pago Deuda con método
+   Transferencia y descuenta el monto del saldo restante.
+   Si el saldo llega a 0 o menos, se marca la deuda como inactiva.
+   ============================================================ */
+
+function obtenerHojaDeudas(ss) {
+  var sheet = ss.getSheetByName('Deudas');
+  if (!sheet) {
+    sheet = ss.insertSheet('Deudas');
+    sheet.getRange(1, 1, 1, HEADERS_DEUDAS.length).setValues([HEADERS_DEUDAS]);
+    sheet.getRange(1, 1, 1, HEADERS_DEUDAS.length)
+      .setFontWeight('bold').setBackground('#e74c3c').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 200); // Descripción
+    sheet.setColumnWidth(2, 130); // Monto original
+    sheet.setColumnWidth(3, 110); // Pagado
+    sheet.setColumnWidth(4, 110); // Restante
+    sheet.setColumnWidth(5, 120); // Pago mensual
+    sheet.setColumnWidth(6, 100); // Día del mes
+    sheet.setColumnWidth(7, 80);  // Activa
+    sheet.setColumnWidth(8, 120); // Último pago
+  }
+  return sheet;
+}
+
+function obtenerDeudas() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaDeudas(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_DEUDAS.length).getValues();
+  var resultado = [];
+  data.forEach(function(fila) {
+    var descripcion = String(fila[0]).trim();
+    if (!descripcion) return;
+    resultado.push({
+      descripcion: descripcion,
+      montoOriginal: parseFloat(fila[1]) || 0,
+      pagado: parseFloat(fila[2]) || 0,
+      restante: parseFloat(fila[3]) || 0,
+      pagoMensual: parseFloat(fila[4]) || 0,
+      diaMes: parseInt(fila[5], 10) || 1,
+      activa: String(fila[6]).trim() === 'Sí',
+      ultimoPago: fila[7] instanceof Date
+        ? Utilities.formatDate(fila[7], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : ''
+    });
+  });
+  return resultado;
+}
+
+/**
+ * Asegura que la subcategoría "Pago Deuda" exista en Gastos Fijos.
+ * Si la crea, refresca el Dashboard.
+ */
+function _asegurarSubcategoriaPagoDeuda() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var config = obtenerHojaConfig(ss);
+  var data = config.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === CATEGORIA_PAGO_DEUDA &&
+        String(data[i][1]).trim() === SUBCAT_PAGO_DEUDA) {
+      return; // ya existe
+    }
+  }
+  config.appendRow([CATEGORIA_PAGO_DEUDA, SUBCAT_PAGO_DEUDA]);
+  _refreshDashboardSilencioso();
+}
+
+function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    montoOriginal = parseFloat(montoOriginal);
+    pagoMensual = parseFloat(pagoMensual);
+    diaMes = parseInt(diaMes, 10);
+
+    if (!descripcion) return { success: false, message: 'Falta descripción' };
+    if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
+    if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Pago mensual inválido' };
+    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes debe estar entre 1 y 28' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaDeudas(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim().toLowerCase() === descripcion.toLowerCase()) {
+        return { success: false, message: 'Ya existe una deuda con esa descripción' };
+      }
+    }
+
+    _asegurarSubcategoriaPagoDeuda();
+
+    sheet.appendRow([descripcion, montoOriginal, 0, montoOriginal, pagoMensual, diaMes, 'Sí', '']);
+    var nr = sheet.getLastRow();
+    sheet.getRange(nr, 2).setNumberFormat('$#,##0.00');
+    sheet.getRange(nr, 3).setNumberFormat('$#,##0.00');
+    sheet.getRange(nr, 4).setNumberFormat('$#,##0.00');
+    sheet.getRange(nr, 5).setNumberFormat('$#,##0.00');
+    sheet.getRange(nr, 8).setNumberFormat('dd/MM/yyyy');
+
+    return { success: true, message: 'Deuda agregada', deudas: obtenerDeudas() };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+function actualizarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, activa) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    montoOriginal = parseFloat(montoOriginal);
+    pagoMensual = parseFloat(pagoMensual);
+    diaMes = parseInt(diaMes, 10);
+
+    if (!descripcion) return { success: false, message: 'Falta descripción' };
+    if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
+    if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Pago mensual inválido' };
+    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes 1-28' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaDeudas(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === descripcion) {
+        var pagado = parseFloat(data[i][2]) || 0;
+        sheet.getRange(i + 1, 2).setValue(montoOriginal);
+        sheet.getRange(i + 1, 4).setValue(montoOriginal - pagado); // recalcular restante
+        sheet.getRange(i + 1, 5).setValue(pagoMensual);
+        sheet.getRange(i + 1, 6).setValue(diaMes);
+        sheet.getRange(i + 1, 7).setValue(activa ? 'Sí' : 'No');
+        return { success: true, message: 'Deuda actualizada', deudas: obtenerDeudas() };
+      }
+    }
+    return { success: false, message: 'Deuda no encontrada' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+function eliminarDeuda(descripcion) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaDeudas(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === descripcion) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'Deuda eliminada', deudas: obtenerDeudas() };
+      }
+    }
+    return { success: false, message: 'Deuda no encontrada' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+/**
+ * FUNCIÓN PRINCIPAL — llamada por trigger 1 vez al día.
+ * Para cada deuda activa cuyo "día del mes" coincida con hoy y aún
+ * no se haya pagado este mes, registra un movimiento y descuenta.
+ */
+function procesarPagosDeudas() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    Logger.log('procesarPagosDeudas: no se pudo adquirir el lock');
+    return { procesados: 0 };
+  }
+  try {
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaDeudas(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { procesados: 0 };
+
+    _asegurarSubcategoriaPagoDeuda();
+
+    var hoy = new Date();
+    var diaHoy = hoy.getDate();
+    var mesHoy = hoy.getMonth();
+    var anioHoy = hoy.getFullYear();
+    var fechaHoyStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_DEUDAS.length).getValues();
+    var procesados = 0;
+
+    data.forEach(function(fila, i) {
+      var descripcion = String(fila[0]).trim();
+      var montoOriginal = parseFloat(fila[1]) || 0;
+      var pagado = parseFloat(fila[2]) || 0;
+      var restante = parseFloat(fila[3]) || 0;
+      var pagoMensual = parseFloat(fila[4]) || 0;
+      var diaMes = parseInt(fila[5], 10) || 1;
+      var activa = String(fila[6]).trim() === 'Sí';
+      var ultimoPago = fila[7] instanceof Date ? fila[7] : null;
+
+      if (!descripcion || !activa) return;
+      if (restante <= 0) {
+        sheet.getRange(i + 2, 7).setValue('No');
+        return;
+      }
+      if (diaMes !== diaHoy) return;
+      // ya se pagó este mes?
+      if (ultimoPago && ultimoPago.getMonth() === mesHoy && ultimoPago.getFullYear() === anioHoy) return;
+
+      var montoPago = Math.min(pagoMensual, restante);
+
+      registrarMovimiento({
+        fecha: fechaHoyStr,
+        categoria: CATEGORIA_PAGO_DEUDA,
+        subcategoria: SUBCAT_PAGO_DEUDA,
+        monto: montoPago,
+        descripcion: descripcion,
+        metodoPago: 'Transferencia',
+        notas: '[Auto Deuda] ' + descripcion
+      });
+
+      var nuevoPagado = pagado + montoPago;
+      var nuevoRestante = montoOriginal - nuevoPagado;
+      sheet.getRange(i + 2, 3).setValue(nuevoPagado);
+      sheet.getRange(i + 2, 4).setValue(nuevoRestante);
+      sheet.getRange(i + 2, 8).setValue(hoy);
+      if (nuevoRestante <= 0) sheet.getRange(i + 2, 7).setValue('No');
+      procesados++;
+    });
+
+    Logger.log('Deudas: pagos procesados hoy = ' + procesados);
+    return { procesados: procesados };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Crea el trigger diario para procesarPagosDeudas.
+ * Ejecuta 1 vez desde el editor de Apps Script.
+ */
+function crearTriggerDeudas() {
+  eliminarTriggerDeudas();
+  ScriptApp.newTrigger('procesarPagosDeudas')
+    .timeBased()
+    .atHour(6)
+    .everyDays(1)
+    .create();
+  Logger.log('Trigger creado: procesarPagosDeudas diario ~6am');
+}
+
+function eliminarTriggerDeudas() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var count = 0;
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'procesarPagosDeudas') {
+      ScriptApp.deleteTrigger(t);
+      count++;
+    }
+  });
+  Logger.log('Triggers de deudas eliminados: ' + count);
 }

@@ -690,6 +690,163 @@
       animation: spin 0.7s linear infinite;
     }
 
+    /* Deudas */
+    .deuda-item {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 12px;
+      border-left: 4px solid var(--danger);
+    }
+
+    .deuda-item.inactiva {
+      opacity: 0.55;
+      border-left-color: var(--text-light);
+    }
+
+    .deuda-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 8px;
+    }
+
+    .deuda-title {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .deuda-title-inactive-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      background: var(--text-light);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 8px;
+      margin-left: 6px;
+      vertical-align: middle;
+      text-transform: uppercase;
+    }
+
+    .deuda-progress {
+      height: 8px;
+      background: rgba(0,0,0,0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .deuda-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--success), #2ecc71);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .deuda-stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .deuda-stats-restante { font-weight: 700; color: var(--danger); }
+    .deuda-stats-orig { color: var(--text-light); }
+
+    .deuda-meta {
+      font-size: 12px;
+      color: var(--text-light);
+    }
+
+    .deuda-meta strong { color: var(--text); }
+
+    /* Edit form inline */
+    .deuda-edit-form {
+      background: white;
+      border-radius: var(--radius);
+      padding: 14px;
+      border: 2px solid var(--primary);
+      margin-bottom: 12px;
+    }
+
+    .deuda-edit-form input,
+    .deuda-edit-form select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      margin-bottom: 8px;
+    }
+
+    .deuda-edit-form input:focus,
+    .deuda-edit-form select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .deuda-edit-form .deuda-edit-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 90px;
+      gap: 6px;
+    }
+
+    .deuda-edit-form .deuda-edit-row input {
+      margin-bottom: 0;
+    }
+
+    .deuda-edit-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .deuda-edit-actions button {
+      flex: 1;
+      padding: 8px;
+      border-radius: 8px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .deuda-btn-save {
+      background: var(--primary);
+      color: white;
+    }
+
+    .deuda-btn-cancel {
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .deuda-add-form {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-top: 12px;
+    }
+
+    .deuda-add-form label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      display: block;
+    }
+
     .config-add-row {
       display: flex;
       gap: 6px;
@@ -988,6 +1145,7 @@
       <div class="modal-tabs">
         <button class="modal-tab active" data-tab="subcategorias" onclick="switchTab('subcategorias')">Subcategorías</button>
         <button class="modal-tab" data-tab="tarjetas" onclick="switchTab('tarjetas')">Tarjetas</button>
+        <button class="modal-tab" data-tab="deudas" onclick="switchTab('deudas')">Deudas</button>
         <button class="modal-tab" data-tab="emails" onclick="switchTab('emails')">
           Emails <span class="tab-badge" id="tabEmailsBadge" style="display:none;">0</span>
         </button>
@@ -995,6 +1153,7 @@
       <div class="modal-body">
         <div class="tab-panel active" id="tabSubcategorias"></div>
         <div class="tab-panel" id="tabTarjetas"></div>
+        <div class="tab-panel" id="tabDeudas"></div>
         <div class="tab-panel" id="tabEmails"></div>
       </div>
     </div>
@@ -1116,6 +1275,9 @@
     // [{ ultimos4, tipo, alias }]
     var tarjetas = [];
 
+    // [{ descripcion, montoOriginal, pagado, restante, pagoMensual, diaMes, activa, ultimoPago }]
+    var deudas = [];
+
     var pendientesCount = 0;
 
     var subcategoriasExpandidas = {};  // ej: {'Gastos Fijos::Suscripciones': true}
@@ -1169,6 +1331,11 @@
         .withSuccessHandler(function(data) { if (data) tarjetas = data; })
         .withFailureHandler(function(err) { console.error('tarjetas:', err); })
         .obtenerTarjetas();
+
+      google.script.run
+        .withSuccessHandler(function(data) { if (data) deudas = data; })
+        .withFailureHandler(function(err) { console.error('deudas:', err); })
+        .obtenerDeudas();
 
       google.script.run
         .withSuccessHandler(function(n) { pendientesCount = n || 0; actualizarBadgeEmails(); })
@@ -1396,6 +1563,7 @@
       switchTab('subcategorias');
       renderizarSubcategorias();
       renderizarTarjetas();
+      renderizarDeudas();
       renderizarEmails();
       document.getElementById('modalConfig').classList.add('open');
     }
@@ -1415,6 +1583,7 @@
       });
       document.getElementById('tabSubcategorias').classList.toggle('active', tab === 'subcategorias');
       document.getElementById('tabTarjetas').classList.toggle('active', tab === 'tarjetas');
+      document.getElementById('tabDeudas').classList.toggle('active', tab === 'deudas');
       document.getElementById('tabEmails').classList.toggle('active', tab === 'emails');
     }
 
@@ -2077,6 +2246,324 @@
           showToast('Error: ' + err.message, 'error');
         })
         .regenerarDashboard();
+    }
+
+    /* ============================================================
+       TAB: DEUDAS ROTATIVAS
+       ============================================================ */
+
+    function renderizarDeudas() {
+      var body = document.getElementById('tabDeudas');
+      body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'Cada deuda se paga automáticamente 1 vez al mes en <strong>Gastos Fijos → Pago Deuda</strong> (método Transferencia). Activa el trigger diario con <code>crearTriggerDeudas()</code>.';
+      body.appendChild(hint);
+
+      var lista = document.createElement('div');
+      if (deudas.length === 0) {
+        var vacio = document.createElement('div');
+        vacio.className = 'config-empty';
+        vacio.textContent = 'Aún no tienes deudas registradas.';
+        lista.appendChild(vacio);
+      } else {
+        deudas.forEach(function(d) {
+          lista.appendChild(renderDeudaCard(d));
+        });
+      }
+      body.appendChild(lista);
+
+      // Add form
+      var form = document.createElement('div');
+      form.className = 'deuda-add-form';
+
+      var labelDesc = document.createElement('label');
+      labelDesc.textContent = 'Nueva deuda';
+      form.appendChild(labelDesc);
+
+      var inpDesc = document.createElement('input');
+      inpDesc.type = 'text';
+      inpDesc.placeholder = 'Descripción (ej: Laptop, Wells Fargo negocio)';
+      form.appendChild(inpDesc);
+
+      var row = document.createElement('div');
+      row.className = 'deuda-edit-row';
+
+      var inpMonto = document.createElement('input');
+      inpMonto.type = 'number';
+      inpMonto.placeholder = 'Monto total';
+      inpMonto.step = '0.01';
+      inpMonto.min = '0.01';
+      row.appendChild(inpMonto);
+
+      var inpMens = document.createElement('input');
+      inpMens.type = 'number';
+      inpMens.placeholder = 'Pago mensual';
+      inpMens.step = '0.01';
+      inpMens.min = '0.01';
+      row.appendChild(inpMens);
+
+      var inpDia = document.createElement('input');
+      inpDia.type = 'number';
+      inpDia.placeholder = 'Día';
+      inpDia.min = '1';
+      inpDia.max = '28';
+      row.appendChild(inpDia);
+
+      form.appendChild(row);
+
+      var btn = document.createElement('button');
+      btn.textContent = 'Agregar deuda';
+      btn.className = 'btn-regen-dashboard';
+      btn.style.marginTop = '10px';
+      btn.style.borderStyle = 'solid';
+      btn.style.background = 'var(--primary)';
+      btn.style.color = 'white';
+      btn.style.borderColor = 'var(--primary)';
+      btn.onclick = function() { doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia); };
+      form.appendChild(btn);
+
+      body.appendChild(form);
+    }
+
+    function renderDeudaCard(d) {
+      var item = document.createElement('div');
+      item.className = 'deuda-item' + (d.activa ? '' : ' inactiva');
+      item.dataset.desc = d.descripcion;
+
+      var header = document.createElement('div');
+      header.className = 'deuda-header';
+      var title = document.createElement('div');
+      title.className = 'deuda-title';
+      title.textContent = d.descripcion;
+      if (!d.activa) {
+        var badge = document.createElement('span');
+        badge.className = 'deuda-title-inactive-badge';
+        badge.textContent = 'Inactiva';
+        title.appendChild(badge);
+      }
+      header.appendChild(title);
+
+      var actions = document.createElement('div');
+      actions.className = 'config-item-actions';
+
+      var btnEdit = document.createElement('button');
+      btnEdit.className = 'config-edit-btn';
+      btnEdit.innerHTML = '&#9998;';
+      btnEdit.title = 'Editar';
+      btnEdit.onclick = function() { abrirEdicionDeuda(d, item); };
+      actions.appendChild(btnEdit);
+
+      var btnDel = document.createElement('button');
+      btnDel.className = 'config-delete-btn';
+      btnDel.innerHTML = '&times;';
+      btnDel.title = 'Eliminar';
+      btnDel.onclick = function() { doEliminarDeuda(d.descripcion); };
+      actions.appendChild(btnDel);
+      header.appendChild(actions);
+
+      item.appendChild(header);
+
+      var pct = d.montoOriginal > 0 ? Math.min(100, Math.round((d.pagado / d.montoOriginal) * 100)) : 0;
+      var progress = document.createElement('div');
+      progress.className = 'deuda-progress';
+      var bar = document.createElement('div');
+      bar.className = 'deuda-progress-bar';
+      bar.style.width = pct + '%';
+      progress.appendChild(bar);
+      item.appendChild(progress);
+
+      var stats = document.createElement('div');
+      stats.className = 'deuda-stats';
+      var restante = document.createElement('span');
+      restante.className = 'deuda-stats-restante';
+      restante.textContent = 'Restante: ' + formatUSD(d.restante);
+      var orig = document.createElement('span');
+      orig.className = 'deuda-stats-orig';
+      orig.textContent = pct + '% pagado · Original ' + formatUSD(d.montoOriginal);
+      stats.appendChild(restante);
+      stats.appendChild(orig);
+      item.appendChild(stats);
+
+      var meta = document.createElement('div');
+      meta.className = 'deuda-meta';
+      meta.innerHTML = 'Pago mensual: <strong>' + formatUSD(d.pagoMensual) + '</strong> · Día <strong>' + d.diaMes + '</strong>' +
+        (d.ultimoPago ? ' · Último pago ' + d.ultimoPago : '');
+      item.appendChild(meta);
+
+      return item;
+    }
+
+    function formatUSD(n) {
+      var num = parseFloat(n) || 0;
+      return '$' + num.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function abrirEdicionDeuda(d, cardEl) {
+      var backup = cardEl.innerHTML;
+      var backupClass = cardEl.className;
+      cardEl.innerHTML = '';
+      cardEl.className = 'deuda-edit-form';
+
+      var titleRow = document.createElement('div');
+      titleRow.style.fontWeight = '700';
+      titleRow.style.marginBottom = '10px';
+      titleRow.textContent = 'Editar: ' + d.descripcion;
+      cardEl.appendChild(titleRow);
+
+      var row = document.createElement('div');
+      row.className = 'deuda-edit-row';
+
+      var inpMonto = document.createElement('input');
+      inpMonto.type = 'number';
+      inpMonto.value = d.montoOriginal;
+      inpMonto.step = '0.01';
+      inpMonto.placeholder = 'Monto total';
+      row.appendChild(inpMonto);
+
+      var inpMens = document.createElement('input');
+      inpMens.type = 'number';
+      inpMens.value = d.pagoMensual;
+      inpMens.step = '0.01';
+      inpMens.placeholder = 'Pago mensual';
+      row.appendChild(inpMens);
+
+      var inpDia = document.createElement('input');
+      inpDia.type = 'number';
+      inpDia.value = d.diaMes;
+      inpDia.min = '1';
+      inpDia.max = '28';
+      inpDia.placeholder = 'Día';
+      row.appendChild(inpDia);
+      cardEl.appendChild(row);
+
+      var activaWrap = document.createElement('label');
+      activaWrap.style.display = 'flex';
+      activaWrap.style.alignItems = 'center';
+      activaWrap.style.gap = '6px';
+      activaWrap.style.marginTop = '8px';
+      activaWrap.style.fontSize = '13px';
+      var chkActiva = document.createElement('input');
+      chkActiva.type = 'checkbox';
+      chkActiva.checked = d.activa;
+      chkActiva.style.width = 'auto';
+      chkActiva.style.margin = '0';
+      activaWrap.appendChild(chkActiva);
+      activaWrap.appendChild(document.createTextNode('Deuda activa (genera pagos mensuales)'));
+      cardEl.appendChild(activaWrap);
+
+      var actions = document.createElement('div');
+      actions.className = 'deuda-edit-actions';
+      var save = document.createElement('button');
+      save.className = 'deuda-btn-save';
+      save.textContent = 'Guardar';
+      save.onclick = function() {
+        doActualizarDeuda(
+          d.descripcion,
+          inpMonto.value,
+          inpMens.value,
+          inpDia.value,
+          chkActiva.checked
+        );
+      };
+      var cancel = document.createElement('button');
+      cancel.className = 'deuda-btn-cancel';
+      cancel.textContent = 'Cancelar';
+      cancel.onclick = function() {
+        cardEl.className = backupClass;
+        cardEl.innerHTML = backup;
+        renderizarDeudas(); // reattach handlers
+      };
+      actions.appendChild(cancel);
+      actions.appendChild(save);
+      cardEl.appendChild(actions);
+    }
+
+    function doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia) {
+      var desc = (inpDesc.value || '').trim();
+      var monto = parseFloat(inpMonto.value);
+      var mens = parseFloat(inpMens.value);
+      var dia = parseInt(inpDia.value, 10);
+      if (!desc) { showToast('Falta descripción', 'error'); inpDesc.focus(); return; }
+      if (!monto || monto <= 0) { showToast('Monto inválido', 'error'); inpMonto.focus(); return; }
+      if (!mens || mens <= 0) { showToast('Pago mensual inválido', 'error'); inpMens.focus(); return; }
+      if (!dia || dia < 1 || dia > 28) { showToast('Día del mes: 1-28', 'error'); inpDia.focus(); return; }
+
+      if (previewLocal) {
+        deudas.push({
+          descripcion: desc, montoOriginal: monto, pagado: 0, restante: monto,
+          pagoMensual: mens, diaMes: dia, activa: true, ultimoPago: ''
+        });
+        renderizarDeudas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            deudas = resp.deudas || deudas;
+            renderizarDeudas();
+            showToast('Deuda agregada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .agregarDeuda(desc, monto, mens, dia);
+    }
+
+    function doActualizarDeuda(desc, monto, mens, dia, activa) {
+      if (previewLocal) {
+        for (var i = 0; i < deudas.length; i++) {
+          if (deudas[i].descripcion === desc) {
+            deudas[i].montoOriginal = parseFloat(monto);
+            deudas[i].restante = deudas[i].montoOriginal - deudas[i].pagado;
+            deudas[i].pagoMensual = parseFloat(mens);
+            deudas[i].diaMes = parseInt(dia, 10);
+            deudas[i].activa = !!activa;
+            break;
+          }
+        }
+        renderizarDeudas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            deudas = resp.deudas || deudas;
+            renderizarDeudas();
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .actualizarDeuda(desc, monto, mens, dia, activa);
+    }
+
+    function doEliminarDeuda(desc) {
+      if (!confirm('¿Eliminar la deuda "' + desc + '"?\n\nEsto NO borra los pagos históricos ya registrados en Movimientos.')) return;
+
+      if (previewLocal) {
+        deudas = deudas.filter(function(d) { return d.descripcion !== desc; });
+        renderizarDeudas();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            deudas = resp.deudas || deudas;
+            renderizarDeudas();
+            showToast('Deuda eliminada', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .eliminarDeuda(desc);
     }
 
     /* ============================================================

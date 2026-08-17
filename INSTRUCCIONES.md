@@ -69,6 +69,7 @@ Elige **una** de las dos opciones:
    - **Elementos** (elementos anidados dentro de subcategorías, ej: `Crunchyroll` bajo `Suscripciones`)
    - **Tarjetas** (últimos 4 dígitos + tipo de cada tarjeta — usada por el autoregistro de emails)
    - **Pendientes** (cola del autoregistro por email — emails que faltan mapear)
+   - **Deudas** (catálogo de deudas rotativas con pago mensual automático)
 
 ## Paso 6: Crear el Dashboard
 
@@ -83,7 +84,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.5.0"
+   - **Descripción:** "Registro de Gastos v1.6.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -194,6 +195,54 @@ Si en la pestaña **Emails** ves un badge naranja con un número, hay emails que
 
 En cuanto guardes lo que falta, se registra solo y desaparece de Pendientes.
 
+## Configurar Deudas rotativas (v1.6.0)
+
+Las **deudas rotativas** son deudas que pagas todos los meses un monto fijo (ej: crédito de laptop, tarjeta de crédito del negocio). La app registra el pago automáticamente cada mes.
+
+### Paso A — Preparar la subcategoría
+
+La primera vez que agregues una deuda, la app crea automáticamente la subcategoría **Pago Deuda** en **Gastos Fijos** (si no existe). No tienes que hacer nada manual.
+
+### Paso B — Agregar tus deudas
+
+1. Abre la app → ícono ⚙️ → pestaña **Deudas**
+2. En el formulario "Nueva deuda":
+   - **Descripción**: nombre para identificar la deuda (ej: `Laptop`, `Wells Fargo negocio`)
+   - **Monto total**: cuánto debes en total al inicio (ej: `1500.00`)
+   - **Pago mensual**: cuánto pagas cada mes (ej: `150.00`)
+   - **Día**: día del mes en que se cobra (1-28)
+3. Clic en **Agregar deuda**
+
+Verás una tarjeta con progress bar mostrando cuánto llevas pagado y cuánto falta.
+
+### Paso C — Activar el trigger diario
+
+Esto hace que la app revise diariamente qué deudas toca pagar hoy:
+
+1. En Apps Script, selecciona **`crearTriggerDeudas`** en el dropdown
+2. Clic en **Ejecutar**
+3. En el Registro debe salir: `Trigger creado: procesarPagosDeudas diario ~6am`
+
+Verificación: en Apps Script → ⏰ **Activadores** aparece `procesarPagosDeudas` diario.
+
+### Cómo funciona
+
+Cada mañana, el trigger revisa las deudas activas:
+- Si hoy es el **día del mes** configurado y aún **no se pagó este mes** → registra un movimiento en **Gastos Fijos → Pago Deuda** con método **Transferencia**, descripción = nombre de la deuda, monto = pago mensual
+- Suma al total "Pagado", recalcula "Restante"
+- Si el restante llega a **0 o menos** → la deuda se marca **Inactiva** automáticamente
+- Si el pago mensual es **mayor que el restante** (último pago), solo cobra lo que falta
+
+### Ejemplos
+
+- Agregas deuda `Laptop`, monto 1500, mensual 150, día 5. Cada 5 del mes se registra $150 en Gastos Fijos → Pago Deuda hasta llegar a $0 (10 meses).
+- Agregas `Wells Fargo negocio`, monto 4000, mensual 200, día 15. Igual pero el día 15.
+
+### Editar o pausar una deuda
+
+- Clic en ✏️ de la tarjeta → puedes cambiar monto/pago/día y **pausar** (des-marcar "Deuda activa") sin borrar el historial
+- Clic en ✕ → elimina la deuda del catálogo. **Los pagos históricos ya registrados NO se borran** (siguen en Movimientos)
+
 ## Actualizar la aplicación
 
 Si haces cambios en el código (Code.gs o Index.html):
@@ -238,4 +287,5 @@ Esto crea un ícono como si fuera una app nativa.
 | Elementos | Elementos anidados debajo de subcategorías (ej: `Crunchyroll` bajo `Suscripciones`) |
 | Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta |
 | Pendientes | Cola del autoregistro por email — se procesa sola al agregar lo faltante |
+| Deudas | Deudas rotativas con pago mensual automático |
 | Dashboard | Resumen visual con totales por subcategoría |
