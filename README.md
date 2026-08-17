@@ -142,6 +142,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v1.4.3** — Fix de **duplicados por race condition**: `procesarEmailsBancarios` y `procesarPendientes` ahora usan `LockService` para serializar ejecuciones concurrentes (aparecían duplicados cuando se agregaban tarjeta + elemento casi al mismo tiempo). Defensa en profundidad: dedup por **EmailID** vía Propiedades del script (ventana rodante de 200 IDs procesados)
 - **v1.4.2** — El bot ahora usa la **ausencia del label `Banco/Procesado`** como criterio de "email pendiente", en vez de `is:unread`. Antes, abrir un email en Gmail lo sacaba del pipeline; ahora solo el bot puede marcarlo como procesado (aplicando el label). El `newer_than:7d` sigue limitando el alcance a la última semana
 - **v1.4.1** — El parser de Chase ahora también entiende emails de **tarjeta de débito** ("Realizaste una transacción con tarjeta de débito de $NN.NN con MERCHANT" + "Realizada el" en lugar de "Fecha"). Los emails de débito que ya habían llegado antes se reprocesan solos al sincronizar
 - **v1.4.0** — **Autoregistro desde emails de Chase**. Parser de "Alerta de transacción", cruce con hojas Elementos + Tarjetas, hoja **Pendientes** para mapeos faltantes que se resuelven solos al agregar el elemento/tarjeta, trigger automático cada 15 min y botón manual **"Sincronizar ahora"** en nueva pestaña **Emails** del modal ⚙️. Privacidad por diseño: el script solo consulta emails con label `Banco/Alertas`

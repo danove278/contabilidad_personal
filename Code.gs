@@ -808,6 +808,33 @@ function crearDashboard() {
    Test parser:       testParserChase()
    ============================================================ */
 
+/* --- Dedup por EmailID (defensa contra doble procesamiento) ---
+   Guarda los últimos 200 IDs procesados en Propiedades del script.
+   Cualquier email cuyo ID ya está en esa lista se salta. */
+
+var PROCESSED_EMAILS_KEY = 'PROCESSED_EMAIL_IDS';
+var PROCESSED_EMAILS_MAX = 200;
+
+function _getProcessedEmailIds() {
+  var raw = PropertiesService.getScriptProperties().getProperty(PROCESSED_EMAILS_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch (e) { return []; }
+}
+
+function esEmailProcesado(emailId) {
+  if (!emailId) return false;
+  return _getProcessedEmailIds().indexOf(emailId) !== -1;
+}
+
+function marcarEmailProcesado(emailId) {
+  if (!emailId) return;
+  var ids = _getProcessedEmailIds();
+  if (ids.indexOf(emailId) !== -1) return;
+  ids.push(emailId);
+  if (ids.length > PROCESSED_EMAILS_MAX) ids = ids.slice(-PROCESSED_EMAILS_MAX);
+  PropertiesService.getScriptProperties().setProperty(PROCESSED_EMAILS_KEY, JSON.stringify(ids));
+}
+
 /**
  * Normaliza un texto: mayúsculas, sin espacios ni puntuación.
  * Se usa para comparar "CRUNCHYROLL.COM" con "Crunchyroll".
@@ -948,8 +975,13 @@ function agregarAPendientes(parsed, emailId, threadUrl, motivo) {
 
 /**
  * Intenta registrar un movimiento parseado. Si falta mapeo → Pendientes.
+ * Dedupe por EmailID: si el mismo ID ya se registró antes, salta.
  */
 function intentarRegistrar(parsed, emailId, threadUrl) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
   var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
   var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
 
@@ -972,6 +1004,7 @@ function intentarRegistrar(parsed, emailId, threadUrl) {
     metodoPago: 'Tarjeta ' + mapeoTarj.tipo,
     notas: '[Auto] ' + alias + ' ...' + mapeoTarj.ultimos4
   });
+  if (emailId) marcarEmailProcesado(emailId);
   return { registrado: true };
 }
 
@@ -995,96 +1028,131 @@ function obtenerOCrearLabel(nombre) {
 /**
  * FUNCIÓN PRINCIPAL — llamada por trigger cada 15 min.
  * Solo procesa emails que matchean GMAIL_QUERY y vienen de REMITENTES_PERMITIDOS.
+ * Protegida con LockService para evitar procesamiento concurrente.
  */
 function procesarEmailsBancarios() {
   var stats = { total: 0, registrados: 0, pendientes: 0, ignorados: 0 };
-  var threads = GmailApp.search(GMAIL_QUERY, 0, 50);
-  if (!threads.length) return stats;
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000); // hasta 30 s esperando el lock
+  } catch (e) {
+    Logger.log('procesarEmailsBancarios: no se pudo adquirir el lock, otra ejecución en curso');
+    return stats;
+  }
+  try {
+    var threads = GmailApp.search(GMAIL_QUERY, 0, 50);
+    if (!threads.length) return stats;
 
-  var labelProcesado = obtenerOCrearLabel(LABEL_PROCESADO);
+    var labelProcesado = obtenerOCrearLabel(LABEL_PROCESADO);
 
-  threads.forEach(function(thread) {
-    var messages = thread.getMessages();
-    var procesoAlgunEnEsteThread = false;
+    threads.forEach(function(thread) {
+      var messages = thread.getMessages();
+      var procesoAlgunEnEsteThread = false;
 
-    messages.forEach(function(msg) {
-      // No filtramos por unread: la fuente de la verdad de "ya procesado"
-      // es el label LABEL_PROCESADO del thread (aplicado abajo).
-      if (!esRemitentePermitido(msg.getFrom())) {
-        stats.ignorados++;
-        return;
-      }
-      stats.total++;
+      messages.forEach(function(msg) {
+        // No filtramos por unread: la fuente de la verdad de "ya procesado"
+        // es el label LABEL_PROCESADO del thread (aplicado abajo).
+        if (!esRemitentePermitido(msg.getFrom())) {
+          stats.ignorados++;
+          return;
+        }
+        stats.total++;
 
-      var parsed = parsearEmailChase(msg.getPlainBody(), msg.getDate());
-      if (!parsed) {
-        stats.ignorados++;
-        return;
-      }
+        var parsed = parsearEmailChase(msg.getPlainBody(), msg.getDate());
+        if (!parsed) {
+          stats.ignorados++;
+          return;
+        }
 
-      var res = intentarRegistrar(parsed, msg.getId(), thread.getPermalink());
-      if (res.registrado) stats.registrados++;
-      else stats.pendientes++;
+        var res = intentarRegistrar(parsed, msg.getId(), thread.getPermalink());
+        if (res.registrado) stats.registrados++;
+        else if (res.yaProcesado) stats.ignorados++;
+        else stats.pendientes++;
 
-      msg.markRead();
-      procesoAlgunEnEsteThread = true;
+        msg.markRead();
+        procesoAlgunEnEsteThread = true;
+      });
+
+      if (procesoAlgunEnEsteThread) thread.addLabel(labelProcesado);
     });
 
-    if (procesoAlgunEnEsteThread) thread.addLabel(labelProcesado);
-  });
-
-  Logger.log('Emails: total=' + stats.total + ' registrados=' + stats.registrados +
-             ' pendientes=' + stats.pendientes + ' ignorados=' + stats.ignorados);
-  return stats;
+    Logger.log('Emails: total=' + stats.total + ' registrados=' + stats.registrados +
+               ' pendientes=' + stats.pendientes + ' ignorados=' + stats.ignorados);
+    return stats;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
  * Reprocesa la hoja Pendientes: los que ahora se pueden mapear, los registra
  * y borra su fila. Los que no, se quedan.
+ * Protegida con LockService — dos llamadas concurrentes se serializan (evita
+ * el bug de duplicados cuando se agregan tarjeta + elemento casi al mismo
+ * tiempo y ambas invocan procesarPendientes en paralelo).
  */
 function procesarPendientes() {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
-  var sheet = obtenerHojaPendientes(ss);
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { procesados: 0, restantes: 0 };
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    Logger.log('procesarPendientes: no se pudo adquirir el lock, otra ejecución en curso');
+    return { procesados: 0, restantes: 0 };
+  }
+  try {
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaPendientes(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { procesados: 0, restantes: 0 };
 
-  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_PENDIENTES.length).getValues();
-  var registrados = 0;
-  var filasABorrar = [];
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_PENDIENTES.length).getValues();
+    var registrados = 0;
+    var filasABorrar = [];
 
-  data.forEach(function(fila, i) {
-    var fecha = fila[0];
-    var monto = fila[1];
-    var elementoRaw = String(fila[2] || '').trim();
-    var ultimos4 = String(fila[3] || '').trim();
+    data.forEach(function(fila, i) {
+      var fecha = fila[0];
+      var monto = fila[1];
+      var elementoRaw = String(fila[2] || '').trim();
+      var ultimos4 = String(fila[3] || '').trim();
+      var emailId = String(fila[5] || '').trim();
 
-    var mapeoElem = buscarMapeoElemento(elementoRaw);
-    var mapeoTarj = buscarMapeoTarjeta(ultimos4);
-    if (!mapeoElem || !mapeoTarj) return;
+      // Defensa: si este EmailID ya fue registrado por otro path, borrar sin re-registrar
+      if (emailId && esEmailProcesado(emailId)) {
+        filasABorrar.push(i + 2);
+        return;
+      }
 
-    var fechaStr = fecha instanceof Date
-      ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
-      : String(fecha);
-    var alias = mapeoTarj.alias || 'Chase';
+      var mapeoElem = buscarMapeoElemento(elementoRaw);
+      var mapeoTarj = buscarMapeoTarjeta(ultimos4);
+      if (!mapeoElem || !mapeoTarj) return;
 
-    registrarMovimiento({
-      fecha: fechaStr,
-      categoria: mapeoElem.categoria,
-      subcategoria: mapeoElem.subcategoria,
-      monto: monto,
-      descripcion: mapeoElem.elemento,
-      metodoPago: 'Tarjeta ' + mapeoTarj.tipo,
-      notas: '[Auto] ' + alias + ' ...' + mapeoTarj.ultimos4
+      var fechaStr = fecha instanceof Date
+        ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(fecha);
+      var alias = mapeoTarj.alias || 'Chase';
+
+      registrarMovimiento({
+        fecha: fechaStr,
+        categoria: mapeoElem.categoria,
+        subcategoria: mapeoElem.subcategoria,
+        monto: monto,
+        descripcion: mapeoElem.elemento,
+        metodoPago: 'Tarjeta ' + mapeoTarj.tipo,
+        notas: '[Auto] ' + alias + ' ...' + mapeoTarj.ultimos4
+      });
+      if (emailId) marcarEmailProcesado(emailId);
+      registrados++;
+      filasABorrar.push(i + 2); // +2 porque i=0 corresponde a fila 2
     });
-    registrados++;
-    filasABorrar.push(i + 2); // +2 porque i=0 corresponde a fila 2
-  });
 
-  filasABorrar.sort(function(a, b) { return b - a; }).forEach(function(row) {
-    sheet.deleteRow(row);
-  });
+    filasABorrar.sort(function(a, b) { return b - a; }).forEach(function(row) {
+      sheet.deleteRow(row);
+    });
 
-  return { procesados: registrados, restantes: Math.max(0, sheet.getLastRow() - 1) };
+    return { procesados: registrados, restantes: Math.max(0, sheet.getLastRow() - 1) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
