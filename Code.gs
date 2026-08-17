@@ -572,7 +572,7 @@ function obtenerElementos() {
   return resultado;
 }
 
-function agregarElemento(categoria, subcategoria, elemento) {
+function agregarElemento(categoria, subcategoria, elemento, recurrenteConfig) {
   try {
     categoria = String(categoria || '').trim();
     subcategoria = String(subcategoria || '').trim();
@@ -605,13 +605,31 @@ function agregarElemento(categoria, subcategoria, elemento) {
 
     sheet.appendRow([elemento, categoria, subcategoria]);
 
+    // Si viene config de recurrente, crear el pago recurrente vinculado
+    var recResp = null;
+    if (recurrenteConfig && recurrenteConfig.esRecurrente) {
+      recResp = agregarRecurrente(
+        elemento, categoria, subcategoria,
+        recurrenteConfig.monto,
+        recurrenteConfig.diaMes,
+        recurrenteConfig.metodoPago || 'Transferencia'
+      );
+    }
+
     // Reprocesar pendientes: quizás este elemento desbloquea algunos
     var pend = { procesados: 0 };
     try { pend = procesarPendientes(); } catch (e) { /* silencioso */ }
     var msg = 'Elemento agregado';
+    if (recResp && recResp.success) msg += ' + recurrente';
+    else if (recResp && !recResp.success) msg += ' (error creando recurrente: ' + recResp.message + ')';
     if (pend.procesados > 0) msg += ' — ' + pend.procesados + ' pendiente(s) registrado(s)';
 
-    return { success: true, message: msg, elementos: obtenerElementos() };
+    return {
+      success: true,
+      message: msg,
+      elementos: obtenerElementos(),
+      recurrentes: recResp ? recResp.recurrentes : undefined
+    };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };
   }
@@ -632,7 +650,20 @@ function eliminarElemento(categoria, subcategoria, elemento) {
           String(data[i][1]).trim() === categoria &&
           String(data[i][2]).trim() === subcategoria) {
         sheet.deleteRow(i + 1);
-        return { success: true, message: 'Elemento eliminado', elementos: obtenerElementos() };
+
+        // Auto-cleanup: si existe un recurrente con la misma descripción, borrarlo también
+        var recBorrado = false;
+        try {
+          var recResp = eliminarRecurrente(elemento);
+          if (recResp && recResp.success) recBorrado = true;
+        } catch (e) { /* silencioso */ }
+
+        return {
+          success: true,
+          message: 'Elemento eliminado' + (recBorrado ? ' (y su recurrente)' : ''),
+          elementos: obtenerElementos(),
+          recurrentes: recBorrado ? obtenerRecurrentes() : undefined
+        };
       }
     }
 
@@ -679,10 +710,26 @@ function renombrarElemento(categoria, subcategoria, elemOld, elemNew) {
 
     var actualizados = _actualizarDescripcionEnMovimientos(categoria, subcategoria, elemOld, elemNew);
 
+    // Si hay un recurrente vinculado, renombrarlo también
+    var recRenombrado = false;
+    try {
+      var ssR = SpreadsheetApp.openById(getSpreadsheetId());
+      var recSheet = obtenerHojaRecurrentes(ssR);
+      var recData = recSheet.getDataRange().getValues();
+      for (var j = 1; j < recData.length; j++) {
+        if (String(recData[j][0]).trim() === elemOld) {
+          recSheet.getRange(j + 1, 1).setValue(elemNew);
+          recRenombrado = true;
+          break;
+        }
+      }
+    } catch (e) { /* silencioso */ }
+
     return {
       success: true,
-      message: 'Renombrado — ' + actualizados + ' movimiento(s) actualizado(s)',
-      elementos: obtenerElementos()
+      message: 'Renombrado — ' + actualizados + ' movimiento(s) actualizado(s)' + (recRenombrado ? ' + recurrente' : ''),
+      elementos: obtenerElementos(),
+      recurrentes: recRenombrado ? obtenerRecurrentes() : undefined
     };
   } catch (error) {
     return { success: false, message: 'Error: ' + error.message };

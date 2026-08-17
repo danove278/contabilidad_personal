@@ -1833,6 +1833,15 @@
             var s = document.createElement('span');
             s.className = 'config-item-name';
             s.textContent = el;
+            // Badge si tiene recurrente vinculado
+            var tieneRec = recurrentes.some(function(r) { return r.descripcion === el; });
+            if (tieneRec) {
+              var badgeRec = document.createElement('span');
+              badgeRec.textContent = ' 🔄';
+              badgeRec.title = 'Vinculado a pago recurrente';
+              badgeRec.style.marginLeft = '4px';
+              s.appendChild(badgeRec);
+            }
             elItem.appendChild(s);
 
             var acc = document.createElement('div');
@@ -1866,15 +1875,97 @@
         var inp = document.createElement('input');
         inp.type = 'text';
         inp.placeholder = 'Nuevo elemento (ej: Crunchyroll)';
-        inp.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') { e.preventDefault(); doAgregarElemento(cat, sub, inp); }
-        });
         addEl.appendChild(inp);
         var btnAddEl = document.createElement('button');
         btnAddEl.textContent = 'Agregar';
-        btnAddEl.onclick = function() { doAgregarElemento(cat, sub, inp); };
-        addEl.appendChild(btnAddEl);
         panel.appendChild(addEl);
+
+        // Checkbox: es pago recurrente
+        var recWrap = document.createElement('label');
+        recWrap.style.display = 'flex';
+        recWrap.style.alignItems = 'center';
+        recWrap.style.gap = '6px';
+        recWrap.style.marginTop = '6px';
+        recWrap.style.fontSize = '12px';
+        recWrap.style.color = 'var(--text-light)';
+        recWrap.style.cursor = 'pointer';
+        var chkRec = document.createElement('input');
+        chkRec.type = 'checkbox';
+        chkRec.style.width = 'auto';
+        chkRec.style.margin = '0';
+        recWrap.appendChild(chkRec);
+        recWrap.appendChild(document.createTextNode('🔄 Es un pago recurrente (se registra automáticamente cada mes)'));
+        panel.appendChild(recWrap);
+
+        // Panel de recurrente (oculto por defecto)
+        var recPanel = document.createElement('div');
+        recPanel.style.display = 'none';
+        recPanel.style.marginTop = '6px';
+        recPanel.style.padding = '8px';
+        recPanel.style.background = 'rgba(22,160,133,0.08)';
+        recPanel.style.borderRadius = '6px';
+
+        var recRow = document.createElement('div');
+        recRow.style.display = 'grid';
+        recRow.style.gridTemplateColumns = '1fr 60px 1fr';
+        recRow.style.gap = '4px';
+        var inpMonto = document.createElement('input');
+        inpMonto.type = 'number';
+        inpMonto.placeholder = 'Monto';
+        inpMonto.step = '0.01';
+        inpMonto.style.padding = '6px 8px';
+        inpMonto.style.border = '1px solid var(--border)';
+        inpMonto.style.borderRadius = '4px';
+        inpMonto.style.fontSize = '12px';
+        recRow.appendChild(inpMonto);
+        var inpDia = document.createElement('input');
+        inpDia.type = 'number';
+        inpDia.placeholder = 'Día';
+        inpDia.min = '1';
+        inpDia.max = '28';
+        inpDia.style.padding = '6px 8px';
+        inpDia.style.border = '1px solid var(--border)';
+        inpDia.style.borderRadius = '4px';
+        inpDia.style.fontSize = '12px';
+        recRow.appendChild(inpDia);
+        var selMet = document.createElement('select');
+        selMet.style.padding = '6px 8px';
+        selMet.style.border = '1px solid var(--border)';
+        selMet.style.borderRadius = '4px';
+        selMet.style.fontSize = '12px';
+        ['Transferencia', 'Tarjeta Débito', 'Tarjeta Crédito', 'Efectivo', 'Otro'].forEach(function(m) {
+          var o = document.createElement('option');
+          o.value = m; o.textContent = m;
+          selMet.appendChild(o);
+        });
+        recRow.appendChild(selMet);
+        recPanel.appendChild(recRow);
+        panel.appendChild(recPanel);
+
+        chkRec.addEventListener('change', function() {
+          recPanel.style.display = chkRec.checked ? 'block' : 'none';
+        });
+
+        function submitElemento() {
+          var conf = null;
+          if (chkRec.checked) {
+            conf = {
+              esRecurrente: true,
+              monto: parseFloat(inpMonto.value),
+              diaMes: parseInt(inpDia.value, 10),
+              metodoPago: selMet.value
+            };
+            if (!conf.monto || conf.monto <= 0) { showToast('Monto inválido para el recurrente', 'error'); inpMonto.focus(); return; }
+            if (!conf.diaMes || conf.diaMes < 1 || conf.diaMes > 28) { showToast('Día del mes: 1-28', 'error'); inpDia.focus(); return; }
+          }
+          doAgregarElemento(cat, sub, inp, conf);
+        }
+
+        inp.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); submitElemento(); }
+        });
+        btnAddEl.onclick = submitElemento;
+        addEl.appendChild(btnAddEl);
 
         item.appendChild(panel);
       }
@@ -1939,7 +2030,7 @@
         .eliminarSubcategoria(categoria, subcategoria);
     }
 
-    function doAgregarElemento(categoria, subcategoria, input) {
+    function doAgregarElemento(categoria, subcategoria, input, recurrenteConfig) {
       var valor = (input.value || '').trim();
       if (!valor) { input.focus(); return; }
       input.disabled = true;
@@ -1949,6 +2040,13 @@
         if (!elementos[categoria][subcategoria]) elementos[categoria][subcategoria] = [];
         if (elementos[categoria][subcategoria].indexOf(valor) === -1) {
           elementos[categoria][subcategoria].push(valor);
+        }
+        if (recurrenteConfig && recurrenteConfig.esRecurrente) {
+          recurrentes.push({
+            descripcion: valor, categoria: categoria, subcategoria: subcategoria,
+            monto: recurrenteConfig.monto, diaMes: recurrenteConfig.diaMes,
+            metodoPago: recurrenteConfig.metodoPago, activo: true, ultimoPago: ''
+          });
         }
         input.value = ''; input.disabled = false;
         subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
@@ -1961,10 +2059,11 @@
           input.disabled = false;
           if (resp.success) {
             elementos = resp.elementos || elementos;
+            if (resp.recurrentes) recurrentes = resp.recurrentes;
             input.value = '';
             subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
             renderizarSubcategorias();
-            showToast('Elemento agregado', 'success');
+            showToast(resp.message, 'success');
           } else {
             showToast(resp.message, 'error');
           }
@@ -1973,7 +2072,7 @@
           input.disabled = false;
           showToast('Error: ' + err.message, 'error');
         })
-        .agregarElemento(categoria, subcategoria, valor);
+        .agregarElemento(categoria, subcategoria, valor, recurrenteConfig || null);
     }
 
     function doEliminarElemento(categoria, subcategoria, elemento) {
@@ -1992,9 +2091,10 @@
         .withSuccessHandler(function(resp) {
           if (resp.success) {
             elementos = resp.elementos || elementos;
+            if (resp.recurrentes) recurrentes = resp.recurrentes;
             subcategoriasExpandidas[categoria + '::' + subcategoria] = true;
             renderizarSubcategorias();
-            showToast('Elemento eliminado', 'success');
+            showToast(resp.message, 'success');
           } else {
             showToast(resp.message, 'error');
           }
