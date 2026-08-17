@@ -70,6 +70,7 @@ Elige **una** de las dos opciones:
    - **Tarjetas** (últimos 4 dígitos + tipo de cada tarjeta — usada por el autoregistro de emails)
    - **Pendientes** (cola del autoregistro por email — emails que faltan mapear)
    - **Deudas** (catálogo de deudas rotativas con pago mensual automático)
+   - **4 Pagos** (planes de Chase 4 Pagos detectados, pendientes de confirmar qué movimiento cancelar)
 
 ## Paso 6: Crear el Dashboard
 
@@ -84,7 +85,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.6.0"
+   - **Descripción:** "Registro de Gastos v1.7.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
@@ -243,6 +244,36 @@ Cada mañana, el trigger revisa las deudas activas:
 - Clic en ✏️ de la tarjeta → puedes cambiar monto/pago/día y **pausar** (des-marcar "Deuda activa") sin borrar el historial
 - Clic en ✕ → elimina la deuda del catálogo. **Los pagos históricos ya registrados NO se borran** (siguen en Movimientos)
 
+## Chase 4 Pagos (v1.7.0)
+
+Chase permite dividir un gasto de tarjeta de débito en 4 cuotas (cada 2 semanas). Cuando configuras 4 Pagos en un gasto ya realizado:
+
+1. Chase **devuelve** el monto original a tu cuenta
+2. Chase **cobra** la primera cuota (1/4) y las siguientes 3 cada 2 semanas
+3. Chase te envía un email "¡Éxito! Configuraste un nuevo Chase 4 Pagos"
+
+Como la app ya había registrado la compra original antes de que la convirtieras, tendrías el gasto duplicado ($100 original + 4 × $25 = $200 en total). Para evitarlo:
+
+### Flujo automático
+
+1. Llega el email de setup de Chase → la app lo detecta y agrega el plan a la pestaña **4 Pagos** del modal ⚙️ (verás un badge naranja con el número de planes pendientes)
+2. Abres la app → ⚙️ → **4 Pagos** → verás una tarjeta con:
+   - Comercio (ej: AMAZON.COM)
+   - Número de plan (ej: ···3967)
+   - Monto total y monto por cuota
+   - Dropdown con **candidatos**: movimientos de los últimos 45 días con el mismo monto
+3. Eliges el movimiento que corresponde → clic en **"Anular movimiento"**
+4. La app **borra ese movimiento** de Movimientos y de la hoja del mes. El plan queda marcado como "confirmado" en la hoja **4 Pagos**
+5. Los 4 cobros futuros llegan como transacciones de débito normales y se registran solos con el parser existente
+
+### Si no fue el movimiento correcto o es un falso positivo
+
+Botón **"Ignorar"** → el plan queda marcado como "ignorado" sin borrar nada.
+
+### Emails de recordatorio
+
+Chase también manda emails "Tu pago de Chase 4 Pagos vence en...". La app los marca como procesados en silencio (no requieren acción — solo son avisos).
+
 ## Actualizar la aplicación
 
 Si haces cambios en el código (Code.gs o Index.html):
@@ -288,4 +319,5 @@ Esto crea un ícono como si fuera una app nativa.
 | Tarjetas | Últimos 4 dígitos + tipo (Débito/Crédito) + alias de cada tarjeta |
 | Pendientes | Cola del autoregistro por email — se procesa sola al agregar lo faltante |
 | Deudas | Deudas rotativas con pago mensual automático |
+| 4 Pagos | Planes de Chase 4 Pagos detectados desde emails, esperando confirmación |
 | Dashboard | Resumen visual con totales por subcategoría |

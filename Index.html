@@ -1146,6 +1146,9 @@
         <button class="modal-tab active" data-tab="subcategorias" onclick="switchTab('subcategorias')">Subcategorías</button>
         <button class="modal-tab" data-tab="tarjetas" onclick="switchTab('tarjetas')">Tarjetas</button>
         <button class="modal-tab" data-tab="deudas" onclick="switchTab('deudas')">Deudas</button>
+        <button class="modal-tab" data-tab="pagos4" onclick="switchTab('pagos4')">
+          4 Pagos <span class="tab-badge" id="tabPagos4Badge" style="display:none;">0</span>
+        </button>
         <button class="modal-tab" data-tab="emails" onclick="switchTab('emails')">
           Emails <span class="tab-badge" id="tabEmailsBadge" style="display:none;">0</span>
         </button>
@@ -1154,6 +1157,7 @@
         <div class="tab-panel active" id="tabSubcategorias"></div>
         <div class="tab-panel" id="tabTarjetas"></div>
         <div class="tab-panel" id="tabDeudas"></div>
+        <div class="tab-panel" id="tabPagos4"></div>
         <div class="tab-panel" id="tabEmails"></div>
       </div>
     </div>
@@ -1278,7 +1282,11 @@
     // [{ descripcion, montoOriginal, pagado, restante, pagoMensual, diaMes, activa, ultimoPago }]
     var deudas = [];
 
+    // [{ numeroPlan, fechaDetectada, montoTotal, comercio, cuentaOrigen, cuota, fechaPrimerPago }]
+    var pagos4Pendientes = [];
+
     var pendientesCount = 0;
+    var pagos4Count = 0;
 
     var subcategoriasExpandidas = {};  // ej: {'Gastos Fijos::Suscripciones': true}
 
@@ -1341,12 +1349,31 @@
         .withSuccessHandler(function(n) { pendientesCount = n || 0; actualizarBadgeEmails(); })
         .withFailureHandler(function(err) { console.error('pendientes:', err); })
         .contarPendientes();
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          pagos4Pendientes = data || [];
+          pagos4Count = pagos4Pendientes.length;
+          actualizarBadgePagos4();
+        })
+        .withFailureHandler(function(err) { console.error('4pagos:', err); })
+        .obtener4PagosPendientes();
     }
 
     function actualizarBadgeEmails() {
       var badge = document.getElementById('tabEmailsBadge');
       if (pendientesCount > 0) {
         badge.textContent = pendientesCount;
+        badge.style.display = 'inline-block';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    function actualizarBadgePagos4() {
+      var badge = document.getElementById('tabPagos4Badge');
+      if (pagos4Count > 0) {
+        badge.textContent = pagos4Count;
         badge.style.display = 'inline-block';
       } else {
         badge.style.display = 'none';
@@ -1564,6 +1591,7 @@
       renderizarSubcategorias();
       renderizarTarjetas();
       renderizarDeudas();
+      renderizarPagos4();
       renderizarEmails();
       document.getElementById('modalConfig').classList.add('open');
     }
@@ -1584,6 +1612,7 @@
       document.getElementById('tabSubcategorias').classList.toggle('active', tab === 'subcategorias');
       document.getElementById('tabTarjetas').classList.toggle('active', tab === 'tarjetas');
       document.getElementById('tabDeudas').classList.toggle('active', tab === 'deudas');
+      document.getElementById('tabPagos4').classList.toggle('active', tab === 'pagos4');
       document.getElementById('tabEmails').classList.toggle('active', tab === 'emails');
     }
 
@@ -2567,6 +2596,189 @@
     }
 
     /* ============================================================
+       TAB: 4 PAGOS (setup detectados, pendientes de confirmar)
+       ============================================================ */
+
+    function renderizarPagos4() {
+      var body = document.getElementById('tabPagos4');
+      body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'Cuando Chase detecta que configuraste 4 Pagos, aparece aquí. Confirma qué movimiento se convirtió — la app lo borra para evitar doble contabilización. Los 4 cobros futuros de Chase llegan como transacciones normales.';
+      body.appendChild(hint);
+
+      if (pagos4Pendientes.length === 0) {
+        var vacio = document.createElement('div');
+        vacio.className = 'config-empty';
+        vacio.textContent = 'No hay planes 4 Pagos pendientes.';
+        body.appendChild(vacio);
+        return;
+      }
+
+      pagos4Pendientes.forEach(function(p) {
+        body.appendChild(renderPago4Card(p));
+      });
+    }
+
+    function renderPago4Card(p) {
+      var item = document.createElement('div');
+      item.className = 'deuda-item';
+      item.style.borderLeftColor = '#8e44ad';
+
+      var header = document.createElement('div');
+      header.className = 'deuda-header';
+      var title = document.createElement('div');
+      title.className = 'deuda-title';
+      title.textContent = p.comercio || '(sin comercio)';
+      header.appendChild(title);
+      item.appendChild(header);
+
+      var meta = document.createElement('div');
+      meta.className = 'deuda-meta';
+      meta.style.marginBottom = '10px';
+      meta.innerHTML =
+        'Plan <strong>···' + p.numeroPlan + '</strong> · Total <strong>' + formatUSD(p.montoTotal) + '</strong> · ' +
+        '4 × ' + formatUSD(p.cuota) +
+        ' · Cuenta ···' + p.cuentaOrigen +
+        (p.fechaPrimerPago ? '<br>Primer pago: ' + p.fechaPrimerPago : '');
+      item.appendChild(meta);
+
+      // Loading state para el dropdown
+      var selWrap = document.createElement('div');
+      selWrap.style.marginBottom = '8px';
+      var label = document.createElement('label');
+      label.style.fontSize = '12px';
+      label.style.fontWeight = '600';
+      label.style.color = 'var(--text-light)';
+      label.style.textTransform = 'uppercase';
+      label.style.letterSpacing = '0.5px';
+      label.style.display = 'block';
+      label.style.marginBottom = '4px';
+      label.textContent = 'Movimiento que se convirtió a 4 Pagos';
+      selWrap.appendChild(label);
+
+      var select = document.createElement('select');
+      select.className = 'pago4-select';
+      select.style.width = '100%';
+      select.style.padding = '10px';
+      select.style.borderRadius = '8px';
+      select.style.border = '2px solid var(--border)';
+      select.style.fontSize = '13px';
+      select.style.fontFamily = 'inherit';
+      select.innerHTML = '<option value="">Cargando candidatos...</option>';
+      select.disabled = true;
+      selWrap.appendChild(select);
+      item.appendChild(selWrap);
+
+      var actions = document.createElement('div');
+      actions.className = 'deuda-edit-actions';
+      var btnIgn = document.createElement('button');
+      btnIgn.className = 'deuda-btn-cancel';
+      btnIgn.textContent = 'Ignorar';
+      btnIgn.onclick = function() { doIgnorar4Pagos(p.numeroPlan); };
+      var btnConf = document.createElement('button');
+      btnConf.className = 'deuda-btn-save';
+      btnConf.textContent = 'Anular movimiento';
+      btnConf.disabled = true;
+      btnConf.onclick = function() {
+        var ts = parseFloat(select.value);
+        if (!ts) { showToast('Selecciona un movimiento', 'error'); return; }
+        doConfirmar4Pagos(p.numeroPlan, ts);
+      };
+      actions.appendChild(btnIgn);
+      actions.appendChild(btnConf);
+      item.appendChild(actions);
+
+      // Cargar candidatos async
+      if (previewLocal) {
+        // preview: usar movimiento ficticio
+        select.innerHTML = '<option value="1723800000000">15/08/2026 — AMAZON.COM ($99.00) — Gastos Variables/Compras generales</option>';
+        select.disabled = false;
+        btnConf.disabled = false;
+      } else {
+        google.script.run
+          .withSuccessHandler(function(candidatos) {
+            select.innerHTML = '';
+            if (!candidatos || candidatos.length === 0) {
+              select.innerHTML = '<option value="">No hay movimientos coincidentes en los últimos 45 días</option>';
+              return;
+            }
+            var opt0 = document.createElement('option');
+            opt0.value = '';
+            opt0.textContent = '-- Elige el movimiento --';
+            select.appendChild(opt0);
+            candidatos.forEach(function(c) {
+              var opt = document.createElement('option');
+              opt.value = c.timestamp;
+              opt.textContent = c.fecha + ' — ' + (c.descripcion || '(sin descr.)') +
+                ' — ' + formatUSD(c.monto) + ' — ' + c.categoria + '/' + c.subcategoria;
+              select.appendChild(opt);
+            });
+            select.disabled = false;
+            select.onchange = function() { btnConf.disabled = !select.value; };
+          })
+          .withFailureHandler(function(err) {
+            select.innerHTML = '<option value="">Error cargando candidatos</option>';
+            console.error('candidatos:', err);
+          })
+          .obtenerCandidatos4Pagos(p.montoTotal);
+      }
+
+      return item;
+    }
+
+    function doConfirmar4Pagos(numeroPlan, timestampMillis) {
+      if (previewLocal) {
+        pagos4Pendientes = pagos4Pendientes.filter(function(x) { return x.numeroPlan !== numeroPlan; });
+        pagos4Count = pagos4Pendientes.length;
+        actualizarBadgePagos4();
+        renderizarPagos4();
+        showToast('Movimiento anulado (preview)', 'success');
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            pagos4Pendientes = pagos4Pendientes.filter(function(x) { return x.numeroPlan !== numeroPlan; });
+            pagos4Count = pagos4Pendientes.length;
+            actualizarBadgePagos4();
+            renderizarPagos4();
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .confirmar4Pagos(numeroPlan, timestampMillis);
+    }
+
+    function doIgnorar4Pagos(numeroPlan) {
+      if (!confirm('¿Ignorar este plan 4 Pagos? No se borrará ningún movimiento.')) return;
+      if (previewLocal) {
+        pagos4Pendientes = pagos4Pendientes.filter(function(x) { return x.numeroPlan !== numeroPlan; });
+        pagos4Count = pagos4Pendientes.length;
+        actualizarBadgePagos4();
+        renderizarPagos4();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            pagos4Pendientes = pagos4Pendientes.filter(function(x) { return x.numeroPlan !== numeroPlan; });
+            pagos4Count = pagos4Pendientes.length;
+            actualizarBadgePagos4();
+            renderizarPagos4();
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .ignorar4Pagos(numeroPlan);
+    }
+
+    /* ============================================================
        TAB: EMAILS (autoregistro desde Chase)
        ============================================================ */
 
@@ -2633,6 +2845,15 @@
           if (resp.success) {
             pendientesCount = resp.pendientesRestantes || 0;
             actualizarBadgeEmails();
+            // recargar 4 Pagos por si aparecieron nuevos
+            google.script.run
+              .withSuccessHandler(function(data) {
+                pagos4Pendientes = data || [];
+                pagos4Count = pagos4Pendientes.length;
+                actualizarBadgePagos4();
+                renderizarPagos4();
+              })
+              .obtener4PagosPendientes();
             renderizarEmails();
             switchTab('emails');
             showToast(resp.message, 'success');

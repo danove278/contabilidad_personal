@@ -75,6 +75,14 @@ var HEADERS_DEUDAS = ['Descripción', 'Monto original', 'Pagado', 'Restante', 'P
 var CATEGORIA_PAGO_DEUDA = 'Gastos Fijos';
 var SUBCAT_PAGO_DEUDA = 'Pago Deuda';
 
+var HEADERS_4PAGOS = ['Número plan', 'Fecha detectada', 'Monto total', 'Comercio', 'Cuenta origen', 'Cuota', 'Primer pago', 'Estado', 'Movimiento anulado', 'EmailID'];
+
+// Meses en español completos (para "primer pago de $X agosto 16, 2026")
+var MESES_ES_LARGO = {
+  enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+  julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
+};
+
 /* ============================================================
    CONFIGURACIÓN DEL AUTOREGISTRO POR EMAIL
    ============================================================
@@ -840,6 +848,7 @@ function configurarHoja() {
   obtenerHojaElementos(ss);
   obtenerHojaPendientes(ss);
   obtenerHojaDeudas(ss);
+  obtenerHoja4Pagos(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
@@ -1293,20 +1302,40 @@ function procesarEmailsBancarios() {
           return;
         }
         stats.total++;
+        var body = msg.getPlainBody();
 
-        var parsed = parsearEmailChase(msg.getPlainBody(), msg.getDate());
-        if (!parsed) {
-          stats.ignorados++;
+        // 1) Parser normal (crédito/débito)
+        var parsed = parsearEmailChase(body, msg.getDate());
+        if (parsed) {
+          var res = intentarRegistrar(parsed, msg.getId(), thread.getPermalink());
+          if (res.registrado) stats.registrados++;
+          else if (res.yaProcesado) stats.ignorados++;
+          else stats.pendientes++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
           return;
         }
 
-        var res = intentarRegistrar(parsed, msg.getId(), thread.getPermalink());
-        if (res.registrado) stats.registrados++;
-        else if (res.yaProcesado) stats.ignorados++;
-        else stats.pendientes++;
+        // 2) Parser Chase 4 Pagos - setup (agrega a la queue)
+        var setup4p = parsearEmailChase4PagosSetup(body);
+        if (setup4p && setup4p.numeroPlan) {
+          agregar4Pagos(setup4p, msg.getId(), msg.getDate());
+          stats.pendientes++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
 
-        msg.markRead();
-        procesoAlgunEnEsteThread = true;
+        // 3) Parser Chase 4 Pagos - recordatorio (silencioso)
+        if (parsearEmailChase4PagosRecordatorio(body)) {
+          stats.ignorados++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
+        // Ninguno matcheó — ignorar
+        stats.ignorados++;
       });
 
       if (procesoAlgunEnEsteThread) thread.addLabel(labelProcesado);
@@ -1405,10 +1434,13 @@ function sincronizarAhora() {
     if (emails.registrados === 0 && emails.pendientes === 0 && pend.procesados === 0) {
       msg = 'Nada nuevo por procesar';
     }
+    var n4p = contar4PagosPendientes();
+    if (n4p > 0) msg += ' | 4 Pagos por confirmar: ' + n4p;
     return {
       success: true,
       message: msg,
-      pendientesRestantes: pend.restantes
+      pendientesRestantes: pend.restantes,
+      pagos4Pendientes: n4p
     };
   } catch (e) {
     return { success: false, message: 'Error: ' + e.message };
@@ -1744,4 +1776,314 @@ function eliminarTriggerDeudas() {
     }
   });
   Logger.log('Triggers de deudas eliminados: ' + count);
+}
+
+/* ============================================================
+   CHASE 4 PAGOS — cola de confirmación
+   ============================================================
+
+   Chase permite dividir un gasto en 4 cuotas. Al configurar el plan:
+   1. Chase DEVUELVE el monto original a tu cuenta
+   2. Chase COBRA la primera cuota (1/4) y sigue cobrando cada 2 sem
+   3. Manda un email "Configuraste un nuevo Chase 4 Pagos" con el
+      número de plan (identificador único ...NNNN)
+
+   Como la app ya registró la compra original (antes de que la
+   convirtieras a 4 Pagos), quedaría duplicada. Por eso:
+   - El parser detecta el email de setup y lo agrega a la hoja
+     "4 Pagos" como pendiente
+   - El usuario abre la pestaña "4 Pagos" en la app, elige de un
+     dropdown qué movimiento se convirtió (candidato: mismo monto y
+     misma cuenta últimos 30 días), y confirma
+   - La app borra ese movimiento de Movimientos + hoja del mes
+   - Los 4 pagos futuros de Chase llegan como emails de débito
+     normales y el parser existente los agarra automáticamente
+   - Los emails de recordatorio ("Tu pago vence en...") se marcan
+     como procesados en silencio (no requieren acción)
+   ============================================================ */
+
+function obtenerHoja4Pagos(ss) {
+  var sheet = ss.getSheetByName('4 Pagos');
+  if (!sheet) {
+    sheet = ss.insertSheet('4 Pagos');
+    sheet.getRange(1, 1, 1, HEADERS_4PAGOS.length).setValues([HEADERS_4PAGOS]);
+    sheet.getRange(1, 1, 1, HEADERS_4PAGOS.length)
+      .setFontWeight('bold').setBackground('#8e44ad').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 100); // Numero plan
+    sheet.setColumnWidth(2, 110); // Fecha detectada
+    sheet.setColumnWidth(3, 100); // Monto total
+    sheet.setColumnWidth(4, 180); // Comercio
+    sheet.setColumnWidth(5, 100); // Cuenta origen
+    sheet.setColumnWidth(6, 100); // Cuota
+    sheet.setColumnWidth(7, 110); // Primer pago
+    sheet.setColumnWidth(8, 100); // Estado
+    sheet.setColumnWidth(9, 170); // Movimiento anulado
+    sheet.setColumnWidth(10, 200); // EmailID
+  }
+  return sheet;
+}
+
+/**
+ * Parser del email de SETUP de Chase 4 Pagos.
+ * Retorna { numeroPlan, montoTotal, comercio, cuentaOrigen, cuota, fechaPrimerPago } o null.
+ */
+function parsearEmailChase4PagosSetup(body) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+  if (!/Configuraste un nuevo Chase 4 Pagos/i.test(text)) return null;
+
+  // Monto total: "Pusimos $NN.NN de vuelta"
+  var mMonto = text.match(/Pusimos\s+\$\s*([\d,]+\.\d{2})\s+de vuelta/i);
+  if (!mMonto) return null;
+  var montoTotal = parseFloat(mMonto[1].replace(/,/g, ''));
+
+  // Cuenta origen: "en tu cuenta de cheques (...NNNN)"
+  var mCuenta = text.match(/en tu cuenta de cheques\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  var cuentaOrigen = mCuenta ? mCuenta[1] : '';
+
+  // Comercio: después de "POS DEBIT" hasta "(..." o salto
+  var mMerchant = text.match(/POS DEBIT\s+([A-Z0-9][A-Z0-9\s\.\-*&\/]+?)\s*(?:\(\s*\.{3}|\n)/i);
+  var comercio = mMerchant ? mMerchant[1].trim() : '';
+
+  // Número de plan
+  var mPlan = text.match(/N[úu]mero de plan\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  var numeroPlan = mPlan ? mPlan[1] : '';
+
+  // Cuota: "primer pago de $NN.NN"
+  var mCuota = text.match(/primer pago de\s+\$\s*([\d,]+\.\d{2})/i);
+  var cuota = mCuota ? parseFloat(mCuota[1].replace(/,/g, '')) : (montoTotal / 4);
+
+  // Fecha primer pago: "$NN.NN agosto 16, 2026"
+  var fechaPrimerPago = '';
+  var mFecha = text.match(/primer pago de \$[\d.,]+\s+([a-záéíóú]+)\s+(\d{1,2}),?\s*(\d{4})/i);
+  if (mFecha) {
+    var mesNombre = mFecha[1].toLowerCase();
+    var mesNum = MESES_ES_LARGO[mesNombre];
+    if (mesNum !== undefined) {
+      var mm = ('0' + (mesNum + 1)).slice(-2);
+      var dd = ('0' + parseInt(mFecha[2], 10)).slice(-2);
+      fechaPrimerPago = mFecha[3] + '-' + mm + '-' + dd;
+    }
+  }
+
+  return {
+    numeroPlan: numeroPlan,
+    montoTotal: montoTotal,
+    comercio: comercio,
+    cuentaOrigen: cuentaOrigen,
+    cuota: cuota,
+    fechaPrimerPago: fechaPrimerPago
+  };
+}
+
+/**
+ * Parser del email de RECORDATORIO de Chase 4 Pagos.
+ * Retorna { numeroPlan, monto } o null. No requiere acción, solo confirma.
+ */
+function parsearEmailChase4PagosRecordatorio(body) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+  if (!/Tu pago de Chase 4 Pagos vence/i.test(text)) return null;
+
+  var mPlan = text.match(/Cuenta del plan\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  var mMonto = text.match(/Cantidad actual adeudada\s*\$\s*([\d,]+\.\d{2})/i);
+
+  return {
+    numeroPlan: mPlan ? mPlan[1] : '',
+    monto: mMonto ? parseFloat(mMonto[1].replace(/,/g, '')) : 0
+  };
+}
+
+/**
+ * Agrega un setup de 4 Pagos a la hoja (dedupe por número de plan).
+ */
+function agregar4Pagos(setup, emailId, fecha) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHoja4Pagos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2 && setup.numeroPlan) {
+    var planes = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < planes.length; i++) {
+      if (String(planes[i][0]).trim() === setup.numeroPlan) return; // ya está
+    }
+  }
+  sheet.appendRow([
+    setup.numeroPlan,
+    fecha || new Date(),
+    setup.montoTotal,
+    setup.comercio,
+    setup.cuentaOrigen,
+    setup.cuota,
+    setup.fechaPrimerPago ? new Date(setup.fechaPrimerPago + 'T00:00:00') : '',
+    'pendiente',
+    '',
+    emailId
+  ]);
+  var nr = sheet.getLastRow();
+  sheet.getRange(nr, 2).setNumberFormat('dd/MM/yyyy');
+  sheet.getRange(nr, 3).setNumberFormat('$#,##0.00');
+  sheet.getRange(nr, 6).setNumberFormat('$#,##0.00');
+  if (setup.fechaPrimerPago) sheet.getRange(nr, 7).setNumberFormat('dd/MM/yyyy');
+}
+
+/**
+ * Retorna los planes 4 Pagos con estado 'pendiente' para el frontend.
+ */
+function obtener4PagosPendientes() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHoja4Pagos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_4PAGOS.length).getValues();
+  var resultado = [];
+  data.forEach(function(fila) {
+    if (String(fila[7]).trim() !== 'pendiente') return;
+    resultado.push({
+      numeroPlan: String(fila[0]).trim(),
+      fechaDetectada: fila[1] instanceof Date
+        ? Utilities.formatDate(fila[1], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(fila[1]),
+      montoTotal: parseFloat(fila[2]) || 0,
+      comercio: String(fila[3]).trim(),
+      cuentaOrigen: String(fila[4]).trim(),
+      cuota: parseFloat(fila[5]) || 0,
+      fechaPrimerPago: fila[6] instanceof Date
+        ? Utilities.formatDate(fila[6], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : ''
+    });
+  });
+  return resultado;
+}
+
+function contar4PagosPendientes() {
+  return obtener4PagosPendientes().length;
+}
+
+/**
+ * Busca movimientos candidatos para asociar a un plan 4 Pagos.
+ * Filtro: últimos 45 días, mismo monto (±$0.50 de tolerancia).
+ * Retorna [{ timestamp, fecha, categoria, subcategoria, monto, descripcion, notas }].
+ */
+function obtenerCandidatos4Pagos(montoTotal) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaMovimientos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var monto = parseFloat(montoTotal) || 0;
+  var hoy = new Date();
+  var hace45 = new Date(hoy.getTime() - 45 * 24 * 3600 * 1000);
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+  var candidatos = [];
+  data.forEach(function(fila) {
+    var ts = fila[0];
+    if (!(ts instanceof Date) || ts < hace45) return;
+    var m = parseFloat(fila[4]) || 0;
+    if (Math.abs(m - monto) > 0.5) return;
+    candidatos.push({
+      timestamp: ts.getTime(),
+      fechaTs: Utilities.formatDate(ts, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
+      fecha: fila[1] instanceof Date
+        ? Utilities.formatDate(fila[1], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(fila[1]),
+      categoria: String(fila[2]).trim(),
+      subcategoria: String(fila[3]).trim(),
+      monto: m,
+      descripcion: String(fila[5]).trim(),
+      metodoPago: String(fila[6]).trim(),
+      notas: String(fila[7]).trim()
+    });
+  });
+  candidatos.sort(function(a, b) { return b.timestamp - a.timestamp; });
+  return candidatos;
+}
+
+/**
+ * Confirma un plan 4 Pagos: borra el movimiento seleccionado de
+ * Movimientos y de la hoja del mes correspondiente, marca el plan
+ * como 'confirmado'.
+ */
+function confirmar4Pagos(numeroPlan, timestampMillis) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch (e) {
+    return { success: false, message: 'Otra operación en curso, reintenta' };
+  }
+  try {
+    numeroPlan = String(numeroPlan || '').trim();
+    var ts = parseFloat(timestampMillis);
+    if (!numeroPlan || !ts) return { success: false, message: 'Faltan datos' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+
+    // 1) Borrar movimiento de Movimientos
+    var mov = obtenerHojaMovimientos(ss);
+    var borrado = _borrarMovimientoPorTimestamp(mov, ts);
+    if (!borrado.ok) return { success: false, message: 'No encontré el movimiento en Movimientos' };
+
+    // 2) Borrar de la hoja del mes correspondiente
+    var fechaMov = borrado.fecha;
+    if (fechaMov instanceof Date) {
+      var fechaStr = Utilities.formatDate(fechaMov, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      var hojaMes = obtenerHojaMes(ss, fechaStr);
+      _borrarMovimientoPorTimestamp(hojaMes, ts);
+    }
+
+    // 3) Marcar el plan como confirmado
+    var sheet = obtenerHoja4Pagos(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_4PAGOS.length).getValues();
+      for (var i = 0; i < data.length; i++) {
+        if (String(data[i][0]).trim() === numeroPlan && String(data[i][7]).trim() === 'pendiente') {
+          sheet.getRange(i + 2, 8).setValue('confirmado');
+          sheet.getRange(i + 2, 9).setValue(new Date(ts));
+          sheet.getRange(i + 2, 9).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+          break;
+        }
+      }
+    }
+
+    return { success: true, message: 'Movimiento anulado y plan confirmado' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function _borrarMovimientoPorTimestamp(sheet, timestampMillis) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: false };
+  var data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var ts = data[i][0];
+    if (ts instanceof Date && ts.getTime() === timestampMillis) {
+      var fecha = data[i][1];
+      sheet.deleteRow(i + 2);
+      return { ok: true, fecha: fecha };
+    }
+  }
+  return { ok: false };
+}
+
+/**
+ * Marca un plan 4 Pagos como ignorado (por si fue detección incorrecta).
+ */
+function ignorar4Pagos(numeroPlan) {
+  try {
+    numeroPlan = String(numeroPlan || '').trim();
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHoja4Pagos(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: false, message: 'No hay planes' };
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_4PAGOS.length).getValues();
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][0]).trim() === numeroPlan && String(data[i][7]).trim() === 'pendiente') {
+        sheet.getRange(i + 2, 8).setValue('ignorado');
+        return { success: true, message: 'Plan ignorado' };
+      }
+    }
+    return { success: false, message: 'Plan no encontrado' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
 }
