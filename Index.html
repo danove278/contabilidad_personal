@@ -1146,6 +1146,7 @@
         <button class="modal-tab active" data-tab="subcategorias" onclick="switchTab('subcategorias')">Subcategorías</button>
         <button class="modal-tab" data-tab="tarjetas" onclick="switchTab('tarjetas')">Tarjetas</button>
         <button class="modal-tab" data-tab="deudas" onclick="switchTab('deudas')">Deudas</button>
+        <button class="modal-tab" data-tab="recurrentes" onclick="switchTab('recurrentes')">Recurrentes</button>
         <button class="modal-tab" data-tab="pagos4" onclick="switchTab('pagos4')">
           4 Pagos <span class="tab-badge" id="tabPagos4Badge" style="display:none;">0</span>
         </button>
@@ -1157,6 +1158,7 @@
         <div class="tab-panel active" id="tabSubcategorias"></div>
         <div class="tab-panel" id="tabTarjetas"></div>
         <div class="tab-panel" id="tabDeudas"></div>
+        <div class="tab-panel" id="tabRecurrentes"></div>
         <div class="tab-panel" id="tabPagos4"></div>
         <div class="tab-panel" id="tabEmails"></div>
       </div>
@@ -1282,6 +1284,9 @@
     // [{ descripcion, montoOriginal, pagado, restante, pagoMensual, diaMes, activa, ultimoPago }]
     var deudas = [];
 
+    // [{ descripcion, categoria, subcategoria, monto, diaMes, metodoPago, activo, ultimoPago }]
+    var recurrentes = [];
+
     // [{ numeroPlan, fechaDetectada, montoTotal, comercio, cuentaOrigen, cuota, fechaPrimerPago }]
     var pagos4Pendientes = [];
 
@@ -1344,6 +1349,11 @@
         .withSuccessHandler(function(data) { if (data) deudas = data; })
         .withFailureHandler(function(err) { console.error('deudas:', err); })
         .obtenerDeudas();
+
+      google.script.run
+        .withSuccessHandler(function(data) { if (data) recurrentes = data; })
+        .withFailureHandler(function(err) { console.error('recurrentes:', err); })
+        .obtenerRecurrentes();
 
       google.script.run
         .withSuccessHandler(function(n) { pendientesCount = n || 0; actualizarBadgeEmails(); })
@@ -1591,6 +1601,7 @@
       renderizarSubcategorias();
       renderizarTarjetas();
       renderizarDeudas();
+      renderizarRecurrentes();
       renderizarPagos4();
       renderizarEmails();
       document.getElementById('modalConfig').classList.add('open');
@@ -1612,6 +1623,7 @@
       document.getElementById('tabSubcategorias').classList.toggle('active', tab === 'subcategorias');
       document.getElementById('tabTarjetas').classList.toggle('active', tab === 'tarjetas');
       document.getElementById('tabDeudas').classList.toggle('active', tab === 'deudas');
+      document.getElementById('tabRecurrentes').classList.toggle('active', tab === 'recurrentes');
       document.getElementById('tabPagos4').classList.toggle('active', tab === 'pagos4');
       document.getElementById('tabEmails').classList.toggle('active', tab === 'emails');
     }
@@ -2632,6 +2644,375 @@
         })
         .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
         .eliminarDeuda(desc);
+    }
+
+    /* ============================================================
+       TAB: PAGOS RECURRENTES (gastos fijos mensuales auto-generados)
+       ============================================================ */
+
+    var METODOS_PAGO = ['Efectivo', 'Tarjeta Débito', 'Tarjeta Crédito', 'Transferencia', 'Otro'];
+
+    function renderizarRecurrentes() {
+      var body = document.getElementById('tabRecurrentes');
+      body.innerHTML = '';
+
+      var hint = document.createElement('div');
+      hint.className = 'tab-hint';
+      hint.innerHTML = 'Movimientos que se registran <strong>automáticamente cada mes</strong> en el día que elijas. Ideal para gym, membresías, HOA. Trigger diario: <code>crearTriggerRecurrentes()</code>.<br><em style="color:var(--warning);">⚠️ NO uses esto para pagos que ya llegan por email de Chase (se duplicarían).</em>';
+      body.appendChild(hint);
+
+      var lista = document.createElement('div');
+      if (recurrentes.length === 0) {
+        var vacio = document.createElement('div');
+        vacio.className = 'config-empty';
+        vacio.textContent = 'Aún no tienes pagos recurrentes.';
+        lista.appendChild(vacio);
+      } else {
+        recurrentes.forEach(function(r) {
+          lista.appendChild(renderRecurrenteCard(r));
+        });
+      }
+      body.appendChild(lista);
+
+      // Add form
+      var form = document.createElement('div');
+      form.className = 'deuda-add-form';
+
+      var labelDesc = document.createElement('label');
+      labelDesc.textContent = 'Nuevo pago recurrente';
+      form.appendChild(labelDesc);
+
+      var inpDesc = document.createElement('input');
+      inpDesc.type = 'text';
+      inpDesc.placeholder = 'Descripción (ej: Gym, HOA, Netflix)';
+      form.appendChild(inpDesc);
+
+      var selCat = document.createElement('select');
+      selCat.style.marginTop = '8px';
+      selCat.style.padding = '10px';
+      selCat.style.border = '2px solid var(--border)';
+      selCat.style.borderRadius = '8px';
+      selCat.style.width = '100%';
+      selCat.style.fontFamily = 'inherit';
+      selCat.style.fontSize = '14px';
+      CATEGORIAS_ORDEN.forEach(function(cat) {
+        var opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        selCat.appendChild(opt);
+      });
+      form.appendChild(selCat);
+
+      var selSub = document.createElement('select');
+      selSub.style.marginTop = '8px';
+      selSub.style.padding = '10px';
+      selSub.style.border = '2px solid var(--border)';
+      selSub.style.borderRadius = '8px';
+      selSub.style.width = '100%';
+      selSub.style.fontFamily = 'inherit';
+      selSub.style.fontSize = '14px';
+      form.appendChild(selSub);
+
+      function refreshSub() {
+        selSub.innerHTML = '';
+        var subs = subcategorias[selCat.value] || [];
+        if (subs.length === 0) {
+          var o = document.createElement('option');
+          o.value = ''; o.textContent = '-- sin subcategorías --';
+          selSub.appendChild(o);
+        } else {
+          subs.forEach(function(s) {
+            var o = document.createElement('option');
+            o.value = s; o.textContent = s;
+            selSub.appendChild(o);
+          });
+        }
+      }
+      selCat.addEventListener('change', refreshSub);
+      refreshSub();
+
+      var row = document.createElement('div');
+      row.className = 'deuda-edit-row';
+      row.style.marginTop = '8px';
+
+      var inpMonto = document.createElement('input');
+      inpMonto.type = 'number';
+      inpMonto.placeholder = 'Monto';
+      inpMonto.step = '0.01';
+      inpMonto.min = '0.01';
+      row.appendChild(inpMonto);
+
+      var inpDia = document.createElement('input');
+      inpDia.type = 'number';
+      inpDia.placeholder = 'Día';
+      inpDia.min = '1';
+      inpDia.max = '28';
+      row.appendChild(inpDia);
+
+      var selMetodo = document.createElement('select');
+      METODOS_PAGO.forEach(function(m) {
+        var o = document.createElement('option');
+        o.value = m; o.textContent = m;
+        if (m === 'Transferencia') o.selected = true;
+        selMetodo.appendChild(o);
+      });
+      row.appendChild(selMetodo);
+      form.appendChild(row);
+
+      var btn = document.createElement('button');
+      btn.textContent = 'Agregar recurrente';
+      btn.className = 'btn-regen-dashboard';
+      btn.style.marginTop = '10px';
+      btn.style.borderStyle = 'solid';
+      btn.style.background = 'var(--primary)';
+      btn.style.color = 'white';
+      btn.style.borderColor = 'var(--primary)';
+      btn.onclick = function() {
+        doAgregarRecurrente(inpDesc, selCat, selSub, inpMonto, inpDia, selMetodo);
+      };
+      form.appendChild(btn);
+
+      body.appendChild(form);
+    }
+
+    function renderRecurrenteCard(r) {
+      var item = document.createElement('div');
+      item.className = 'deuda-item' + (r.activo ? '' : ' inactiva');
+      item.style.borderLeftColor = '#16a085';
+
+      var header = document.createElement('div');
+      header.className = 'deuda-header';
+      var title = document.createElement('div');
+      title.className = 'deuda-title';
+      title.textContent = r.descripcion;
+      if (!r.activo) {
+        var badge = document.createElement('span');
+        badge.className = 'deuda-title-inactive-badge';
+        badge.textContent = 'Inactivo';
+        title.appendChild(badge);
+      }
+      header.appendChild(title);
+
+      var actions = document.createElement('div');
+      actions.className = 'config-item-actions';
+      var btnEdit = document.createElement('button');
+      btnEdit.className = 'config-edit-btn';
+      btnEdit.innerHTML = '&#9998;';
+      btnEdit.title = 'Editar';
+      btnEdit.onclick = function() { abrirEdicionRecurrente(r, item); };
+      actions.appendChild(btnEdit);
+      var btnDel = document.createElement('button');
+      btnDel.className = 'config-delete-btn';
+      btnDel.innerHTML = '&times;';
+      btnDel.title = 'Eliminar';
+      btnDel.onclick = function() { doEliminarRecurrente(r.descripcion); };
+      actions.appendChild(btnDel);
+      header.appendChild(actions);
+      item.appendChild(header);
+
+      var stats = document.createElement('div');
+      stats.className = 'deuda-stats';
+      var monto = document.createElement('span');
+      monto.className = 'deuda-stats-restante';
+      monto.style.color = '#16a085';
+      monto.textContent = formatUSD(r.monto);
+      var cat = document.createElement('span');
+      cat.className = 'deuda-stats-orig';
+      cat.textContent = r.categoria + ' / ' + r.subcategoria;
+      stats.appendChild(monto);
+      stats.appendChild(cat);
+      item.appendChild(stats);
+
+      var meta = document.createElement('div');
+      meta.className = 'deuda-meta';
+      meta.innerHTML = 'Día <strong>' + r.diaMes + '</strong> · ' + r.metodoPago +
+        (r.ultimoPago ? ' · Último pago ' + r.ultimoPago : '');
+      item.appendChild(meta);
+
+      return item;
+    }
+
+    function abrirEdicionRecurrente(r, cardEl) {
+      var backup = cardEl.innerHTML;
+      var backupClass = cardEl.className;
+      cardEl.innerHTML = '';
+      cardEl.className = 'deuda-edit-form';
+
+      var titleRow = document.createElement('div');
+      titleRow.style.fontWeight = '700';
+      titleRow.style.marginBottom = '10px';
+      titleRow.textContent = 'Editar: ' + r.descripcion;
+      cardEl.appendChild(titleRow);
+
+      var selCat = document.createElement('select');
+      selCat.style.marginBottom = '8px';
+      CATEGORIAS_ORDEN.forEach(function(cat) {
+        var opt = document.createElement('option');
+        opt.value = cat; opt.textContent = cat;
+        if (cat === r.categoria) opt.selected = true;
+        selCat.appendChild(opt);
+      });
+      cardEl.appendChild(selCat);
+
+      var selSub = document.createElement('select');
+      selSub.style.marginBottom = '8px';
+      cardEl.appendChild(selSub);
+      function refreshSub() {
+        selSub.innerHTML = '';
+        (subcategorias[selCat.value] || []).forEach(function(s) {
+          var o = document.createElement('option');
+          o.value = s; o.textContent = s;
+          if (s === r.subcategoria) o.selected = true;
+          selSub.appendChild(o);
+        });
+      }
+      selCat.addEventListener('change', refreshSub);
+      refreshSub();
+
+      var row = document.createElement('div');
+      row.className = 'deuda-edit-row';
+      var inpMonto = document.createElement('input');
+      inpMonto.type = 'number';
+      inpMonto.value = r.monto;
+      inpMonto.step = '0.01';
+      row.appendChild(inpMonto);
+      var inpDia = document.createElement('input');
+      inpDia.type = 'number';
+      inpDia.value = r.diaMes;
+      inpDia.min = '1'; inpDia.max = '28';
+      row.appendChild(inpDia);
+      var selMetodo = document.createElement('select');
+      METODOS_PAGO.forEach(function(m) {
+        var o = document.createElement('option');
+        o.value = m; o.textContent = m;
+        if (m === r.metodoPago) o.selected = true;
+        selMetodo.appendChild(o);
+      });
+      row.appendChild(selMetodo);
+      cardEl.appendChild(row);
+
+      var activaWrap = document.createElement('label');
+      activaWrap.style.display = 'flex';
+      activaWrap.style.alignItems = 'center';
+      activaWrap.style.gap = '6px';
+      activaWrap.style.marginTop = '8px';
+      activaWrap.style.fontSize = '13px';
+      var chkActivo = document.createElement('input');
+      chkActivo.type = 'checkbox';
+      chkActivo.checked = r.activo;
+      chkActivo.style.width = 'auto';
+      chkActivo.style.margin = '0';
+      activaWrap.appendChild(chkActivo);
+      activaWrap.appendChild(document.createTextNode('Activo'));
+      cardEl.appendChild(activaWrap);
+
+      var actions = document.createElement('div');
+      actions.className = 'deuda-edit-actions';
+      var save = document.createElement('button');
+      save.className = 'deuda-btn-save';
+      save.textContent = 'Guardar';
+      save.onclick = function() {
+        doActualizarRecurrente(r.descripcion, selCat.value, selSub.value, inpMonto.value, inpDia.value, selMetodo.value, chkActivo.checked);
+      };
+      var cancel = document.createElement('button');
+      cancel.className = 'deuda-btn-cancel';
+      cancel.textContent = 'Cancelar';
+      cancel.onclick = function() {
+        cardEl.className = backupClass;
+        cardEl.innerHTML = backup;
+        renderizarRecurrentes();
+      };
+      actions.appendChild(cancel);
+      actions.appendChild(save);
+      cardEl.appendChild(actions);
+    }
+
+    function doAgregarRecurrente(inpDesc, selCat, selSub, inpMonto, inpDia, selMetodo) {
+      var desc = (inpDesc.value || '').trim();
+      var cat = selCat.value;
+      var sub = selSub.value;
+      var monto = parseFloat(inpMonto.value);
+      var dia = parseInt(inpDia.value, 10);
+      var metodo = selMetodo.value;
+
+      if (!desc) { showToast('Falta descripción', 'error'); inpDesc.focus(); return; }
+      if (!sub) { showToast('Elige subcategoría', 'error'); return; }
+      if (!monto || monto <= 0) { showToast('Monto inválido', 'error'); inpMonto.focus(); return; }
+      if (!dia || dia < 1 || dia > 28) { showToast('Día del mes: 1-28', 'error'); inpDia.focus(); return; }
+
+      if (previewLocal) {
+        recurrentes.push({
+          descripcion: desc, categoria: cat, subcategoria: sub,
+          monto: monto, diaMes: dia, metodoPago: metodo, activo: true, ultimoPago: ''
+        });
+        renderizarRecurrentes();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            recurrentes = resp.recurrentes || recurrentes;
+            renderizarRecurrentes();
+            showToast('Recurrente agregado', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .agregarRecurrente(desc, cat, sub, monto, dia, metodo);
+    }
+
+    function doActualizarRecurrente(desc, cat, sub, monto, dia, metodo, activo) {
+      if (previewLocal) {
+        for (var i = 0; i < recurrentes.length; i++) {
+          if (recurrentes[i].descripcion === desc) {
+            recurrentes[i].categoria = cat;
+            recurrentes[i].subcategoria = sub;
+            recurrentes[i].monto = parseFloat(monto);
+            recurrentes[i].diaMes = parseInt(dia, 10);
+            recurrentes[i].metodoPago = metodo;
+            recurrentes[i].activo = !!activo;
+            break;
+          }
+        }
+        renderizarRecurrentes();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            recurrentes = resp.recurrentes || recurrentes;
+            renderizarRecurrentes();
+            showToast(resp.message, 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .actualizarRecurrente(desc, cat, sub, monto, dia, metodo, activo);
+    }
+
+    function doEliminarRecurrente(desc) {
+      if (!confirm('¿Eliminar el pago recurrente "' + desc + '"?\n\nEsto NO borra los movimientos históricos ya registrados.')) return;
+      if (previewLocal) {
+        recurrentes = recurrentes.filter(function(r) { return r.descripcion !== desc; });
+        renderizarRecurrentes();
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(resp) {
+          if (resp.success) {
+            recurrentes = resp.recurrentes || recurrentes;
+            renderizarRecurrentes();
+            showToast('Recurrente eliminado', 'success');
+          } else {
+            showToast(resp.message, 'error');
+          }
+        })
+        .withFailureHandler(function(err) { showToast('Error: ' + err.message, 'error'); })
+        .eliminarRecurrente(desc);
     }
 
     /* ============================================================

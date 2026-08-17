@@ -71,6 +71,7 @@ Elige **una** de las dos opciones:
    - **Pendientes** (cola del autoregistro por email — emails que faltan mapear)
    - **Deudas** (catálogo de deudas rotativas con pago mensual automático)
    - **4 Pagos** (planes de Chase 4 Pagos detectados, pendientes de confirmar qué movimiento cancelar)
+   - **Recurrentes** (pagos fijos mensuales auto-generados por trigger)
 
 ## Paso 6: Crear el Dashboard
 
@@ -85,7 +86,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.8.1"
+   - **Descripción:** "Registro de Gastos v1.9.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**

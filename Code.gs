@@ -77,6 +77,12 @@ var SUBCAT_PAGO_DEUDA = 'Pago Deuda';
 
 var HEADERS_4PAGOS = ['Número plan', 'Fecha detectada', 'Monto total', 'Comercio', 'Cuenta origen', 'Cuota', 'Primer pago', 'Estado', 'Movimiento anulado', 'EmailID'];
 
+var HEADERS_RECURRENTES = ['Descripción', 'Categoría', 'Subcategoría', 'Monto', 'Día del mes', 'Método pago', 'Activo', 'Último pago'];
+
+// Destino de depósitos directos autoregistrados
+var CATEGORIA_DEPOSITO = 'Ingresos';
+var SUBCAT_DEPOSITO = 'Depósito directo';
+
 // Meses en español completos (para "primer pago de $X agosto 16, 2026")
 var MESES_ES_LARGO = {
   enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
@@ -849,6 +855,7 @@ function configurarHoja() {
   obtenerHojaPendientes(ss);
   obtenerHojaDeudas(ss);
   obtenerHoja4Pagos(ss);
+  obtenerHojaRecurrentes(ss);
   Logger.log('Hojas configuradas correctamente.');
 }
 
@@ -1230,6 +1237,91 @@ function intentarRegistrarTransferencia(parsed, emailId, threadUrl) {
 }
 
 /**
+ * Parser del email de DEPÓSITO DIRECTO de Chase.
+ * Formato: "Tienes un depósito directo de $NN.NN"
+ * Retorna { fecha, monto, ultimos4, esDeposito } o null.
+ */
+function parsearEmailChaseDeposito(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+
+  if (!/Tienes un dep[óo]sito directo/i.test(text)) return null;
+
+  // Monto: "Tienes un depósito directo de $NN.NN"
+  var mMonto = text.match(/dep[óo]sito directo de\s+\$\s*([\d,]+\.\d{2})/i);
+  if (!mMonto) return null;
+  var monto = parseFloat(mMonto[1].replace(/,/g, ''));
+
+  // Cuenta destino (...NNNN)
+  var mCuenta = text.match(/\(\s*\.{3}\s*(\d{4})\s*\)/);
+  var ultimos4 = mCuenta ? mCuenta[1] : '';
+
+  // Fecha: "Registrado ago 5, 2026"
+  var fecha = null;
+  var mFecha = text.match(/(?:Registrado|Registrada)\s*[:\-]?\s*([a-záéíóú]{3,4})\.?\s*(\d{1,2}),?\s*(\d{4})/i);
+  if (mFecha) {
+    var mesStr = mFecha[1].toLowerCase().substring(0, 3);
+    var dia = parseInt(mFecha[2], 10);
+    var anio = parseInt(mFecha[3], 10);
+    var mesNum = MESES_ES_ABR[mesStr];
+    if (mesNum !== undefined && dia && anio) {
+      fecha = anio + '-' + ('0' + (mesNum + 1)).slice(-2) + '-' + ('0' + dia).slice(-2);
+    }
+  }
+  if (!fecha && emailDate) {
+    fecha = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  if (!monto || !fecha) return null;
+
+  return {
+    fecha: fecha,
+    monto: monto,
+    ultimos4: ultimos4,
+    esDeposito: true
+  };
+}
+
+/**
+ * Registra un depósito directo como Ingresos → Depósito directo.
+ * Auto-crea la subcategoría si no existe.
+ */
+function intentarRegistrarDeposito(parsed, emailId) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
+  _asegurarSubcategoria(CATEGORIA_DEPOSITO, SUBCAT_DEPOSITO);
+
+  registrarMovimiento({
+    fecha: parsed.fecha,
+    categoria: CATEGORIA_DEPOSITO,
+    subcategoria: SUBCAT_DEPOSITO,
+    monto: parsed.monto,
+    descripcion: 'Depósito directo',
+    metodoPago: 'Transferencia',
+    notas: '[Auto Depósito] Cuenta ...' + parsed.ultimos4
+  });
+
+  if (emailId) marcarEmailProcesado(emailId);
+  return { registrado: true };
+}
+
+/**
+ * Asegura que una subcategoría exista en Config. Si la crea, refresca el Dashboard.
+ */
+function _asegurarSubcategoria(categoria, subcategoria) {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var config = obtenerHojaConfig(ss);
+  var data = config.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === categoria &&
+        String(data[i][1]).trim() === subcategoria) return;
+  }
+  config.appendRow([categoria, subcategoria]);
+  _refreshDashboardSilencioso();
+}
+
+/**
  * Si el destinatario matchea el campo "Destinatario" de alguna deuda,
  * actualiza Pagado y Restante. Match exacto (trim + case-insensitive).
  */
@@ -1448,7 +1540,18 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 3) Parser Chase 4 Pagos - setup (agrega a la queue)
+        // 3) Parser depósito directo ("Tienes un depósito directo")
+        var deposito = parsearEmailChaseDeposito(body, msg.getDate());
+        if (deposito) {
+          var resD = intentarRegistrarDeposito(deposito, msg.getId());
+          if (resD.registrado) stats.registrados++;
+          else stats.ignorados++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
+        // 4) Parser Chase 4 Pagos - setup (agrega a la queue)
         var setup4p = parsearEmailChase4PagosSetup(body);
         if (setup4p && setup4p.numeroPlan) {
           agregar4Pagos(setup4p, msg.getId(), msg.getDate());
@@ -1458,7 +1561,7 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 3) Parser Chase 4 Pagos - recordatorio (silencioso)
+        // 5) Parser Chase 4 Pagos - recordatorio (silencioso)
         if (parsearEmailChase4PagosRecordatorio(body)) {
           stats.ignorados++;
           msg.markRead();
@@ -1641,6 +1744,17 @@ function testParserChaseDebito() {
 /**
  * Prueba el parser de transferencias de Chase.
  */
+function testParserChaseDeposito() {
+  var body = 'Depósito registrado\n\n' +
+             'Tienes un depósito directo de $1,513.70\n\n' +
+             'Cuenta que termina en (...8310)\n' +
+             'Registrado ago 5, 2026 a las 3:49 AM ET\n' +
+             'Cantidad $1,513.70';
+  var res = parsearEmailChaseDeposito(body, new Date());
+  Logger.log('Test parser Chase (depósito): ' + JSON.stringify(res));
+  // Esperado: {"fecha":"2026-08-05","monto":1513.7,"ultimos4":"8310","esDeposito":true}
+}
+
 function testParserChaseTransferencia() {
   var body = 'Alerta de transferencia\n\n' +
              'Enviaste $44.00 a WF CREDIT CARD\n\n' +
@@ -1730,20 +1844,9 @@ function obtenerDeudas() {
 
 /**
  * Asegura que la subcategoría "Pago Deuda" exista en Gastos Fijos.
- * Si la crea, refresca el Dashboard.
  */
 function _asegurarSubcategoriaPagoDeuda() {
-  var ss = SpreadsheetApp.openById(getSpreadsheetId());
-  var config = obtenerHojaConfig(ss);
-  var data = config.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === CATEGORIA_PAGO_DEUDA &&
-        String(data[i][1]).trim() === SUBCAT_PAGO_DEUDA) {
-      return; // ya existe
-    }
-  }
-  config.appendRow([CATEGORIA_PAGO_DEUDA, SUBCAT_PAGO_DEUDA]);
-  _refreshDashboardSilencioso();
+  _asegurarSubcategoria(CATEGORIA_PAGO_DEUDA, SUBCAT_PAGO_DEUDA);
 }
 
 function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, destinatario) {
@@ -2261,4 +2364,238 @@ function ignorar4Pagos(numeroPlan) {
   } catch (e) {
     return { success: false, message: 'Error: ' + e.message };
   }
+}
+
+/* ============================================================
+   PAGOS RECURRENTES — gastos fijos que se auto-generan mensualmente
+   ============================================================
+
+   Similar a Deudas pero sin balance ni monto total. Solo un
+   movimiento fijo que se registra cada mes en el día configurado.
+   Ideal para: gym con débito automático de banco externo,
+   subscripciones sin email, HOA, mensualidades sin balance.
+
+   NO usar para pagos que ya llegan por email de Chase (rent vía
+   transfer, subscripciones vía tarjeta) — esos se duplicarían.
+   Para esos casos, agrega un elemento en la subcategoría destino.
+   ============================================================ */
+
+function obtenerHojaRecurrentes(ss) {
+  var sheet = ss.getSheetByName('Recurrentes');
+  if (!sheet) {
+    sheet = ss.insertSheet('Recurrentes');
+    sheet.getRange(1, 1, 1, HEADERS_RECURRENTES.length).setValues([HEADERS_RECURRENTES]);
+    sheet.getRange(1, 1, 1, HEADERS_RECURRENTES.length)
+      .setFontWeight('bold').setBackground('#16a085').setFontColor('white')
+      .setHorizontalAlignment('center');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 180); // Descripción
+    sheet.setColumnWidth(2, 140); // Categoría
+    sheet.setColumnWidth(3, 160); // Subcategoría
+    sheet.setColumnWidth(4, 110); // Monto
+    sheet.setColumnWidth(5, 90);  // Día
+    sheet.setColumnWidth(6, 140); // Método pago
+    sheet.setColumnWidth(7, 80);  // Activo
+    sheet.setColumnWidth(8, 120); // Último pago
+  }
+  return sheet;
+}
+
+function obtenerRecurrentes() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaRecurrentes(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_RECURRENTES.length).getValues();
+  var resultado = [];
+  data.forEach(function(fila) {
+    var descripcion = String(fila[0]).trim();
+    if (!descripcion) return;
+    resultado.push({
+      descripcion: descripcion,
+      categoria: String(fila[1]).trim(),
+      subcategoria: String(fila[2]).trim(),
+      monto: parseFloat(fila[3]) || 0,
+      diaMes: parseInt(fila[4], 10) || 1,
+      metodoPago: String(fila[5]).trim() || 'Transferencia',
+      activo: String(fila[6]).trim() === 'Sí',
+      ultimoPago: fila[7] instanceof Date
+        ? Utilities.formatDate(fila[7], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : ''
+    });
+  });
+  return resultado;
+}
+
+function agregarRecurrente(descripcion, categoria, subcategoria, monto, diaMes, metodoPago) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+    monto = parseFloat(monto);
+    diaMes = parseInt(diaMes, 10);
+    metodoPago = String(metodoPago || 'Transferencia').trim();
+
+    if (!descripcion) return { success: false, message: 'Falta descripción' };
+    if (CATEGORIAS.indexOf(categoria) === -1) return { success: false, message: 'Categoría no válida' };
+    if (!subcategoria) return { success: false, message: 'Falta subcategoría' };
+    if (!monto || monto <= 0) return { success: false, message: 'Monto inválido' };
+    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes debe estar entre 1 y 28' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaRecurrentes(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim().toLowerCase() === descripcion.toLowerCase()) {
+        return { success: false, message: 'Ya existe un pago recurrente con esa descripción' };
+      }
+    }
+
+    sheet.appendRow([descripcion, categoria, subcategoria, monto, diaMes, metodoPago, 'Sí', '']);
+    var nr = sheet.getLastRow();
+    sheet.getRange(nr, 4).setNumberFormat('$#,##0.00');
+    sheet.getRange(nr, 8).setNumberFormat('dd/MM/yyyy');
+
+    return { success: true, message: 'Pago recurrente agregado', recurrentes: obtenerRecurrentes() };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+function actualizarRecurrente(descripcion, categoria, subcategoria, monto, diaMes, metodoPago, activo) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    categoria = String(categoria || '').trim();
+    subcategoria = String(subcategoria || '').trim();
+    monto = parseFloat(monto);
+    diaMes = parseInt(diaMes, 10);
+    metodoPago = String(metodoPago || 'Transferencia').trim();
+
+    if (!descripcion) return { success: false, message: 'Falta descripción' };
+    if (CATEGORIAS.indexOf(categoria) === -1) return { success: false, message: 'Categoría no válida' };
+    if (!subcategoria) return { success: false, message: 'Falta subcategoría' };
+    if (!monto || monto <= 0) return { success: false, message: 'Monto inválido' };
+    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes 1-28' };
+
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaRecurrentes(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === descripcion) {
+        sheet.getRange(i + 1, 2).setValue(categoria);
+        sheet.getRange(i + 1, 3).setValue(subcategoria);
+        sheet.getRange(i + 1, 4).setValue(monto);
+        sheet.getRange(i + 1, 5).setValue(diaMes);
+        sheet.getRange(i + 1, 6).setValue(metodoPago);
+        sheet.getRange(i + 1, 7).setValue(activo ? 'Sí' : 'No');
+        return { success: true, message: 'Pago recurrente actualizado', recurrentes: obtenerRecurrentes() };
+      }
+    }
+    return { success: false, message: 'Pago recurrente no encontrado' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+function eliminarRecurrente(descripcion) {
+  try {
+    descripcion = String(descripcion || '').trim();
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaRecurrentes(ss);
+    var data = sheet.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === descripcion) {
+        sheet.deleteRow(i + 1);
+        return { success: true, message: 'Pago recurrente eliminado', recurrentes: obtenerRecurrentes() };
+      }
+    }
+    return { success: false, message: 'No encontrado' };
+  } catch (e) {
+    return { success: false, message: 'Error: ' + e.message };
+  }
+}
+
+/**
+ * FUNCIÓN PRINCIPAL — trigger diario.
+ * Registra automáticamente cada pago recurrente cuyo día del mes
+ * coincida con hoy y aún no se haya pagado este mes.
+ */
+function procesarPagosRecurrentes() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    Logger.log('procesarPagosRecurrentes: no se pudo adquirir el lock');
+    return { procesados: 0 };
+  }
+  try {
+    var ss = SpreadsheetApp.openById(getSpreadsheetId());
+    var sheet = obtenerHojaRecurrentes(ss);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { procesados: 0 };
+
+    var hoy = new Date();
+    var diaHoy = hoy.getDate();
+    var mesHoy = hoy.getMonth();
+    var anioHoy = hoy.getFullYear();
+    var fechaHoyStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_RECURRENTES.length).getValues();
+    var procesados = 0;
+
+    data.forEach(function(fila, i) {
+      var descripcion = String(fila[0]).trim();
+      var categoria = String(fila[1]).trim();
+      var subcategoria = String(fila[2]).trim();
+      var monto = parseFloat(fila[3]) || 0;
+      var diaMes = parseInt(fila[4], 10) || 1;
+      var metodoPago = String(fila[5]).trim() || 'Transferencia';
+      var activo = String(fila[6]).trim() === 'Sí';
+      var ultimoPago = fila[7] instanceof Date ? fila[7] : null;
+
+      if (!descripcion || !activo || !monto) return;
+      if (diaMes !== diaHoy) return;
+      if (ultimoPago && ultimoPago.getMonth() === mesHoy && ultimoPago.getFullYear() === anioHoy) return;
+
+      registrarMovimiento({
+        fecha: fechaHoyStr,
+        categoria: categoria,
+        subcategoria: subcategoria,
+        monto: monto,
+        descripcion: descripcion,
+        metodoPago: metodoPago,
+        notas: '[Auto Recurrente] ' + descripcion
+      });
+
+      sheet.getRange(i + 2, 8).setValue(hoy);
+      procesados++;
+    });
+
+    Logger.log('Recurrentes: procesados hoy = ' + procesados);
+    return { procesados: procesados };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function crearTriggerRecurrentes() {
+  eliminarTriggerRecurrentes();
+  ScriptApp.newTrigger('procesarPagosRecurrentes')
+    .timeBased()
+    .atHour(6)
+    .everyDays(1)
+    .create();
+  Logger.log('Trigger creado: procesarPagosRecurrentes diario ~6am');
+}
+
+function eliminarTriggerRecurrentes() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var count = 0;
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'procesarPagosRecurrentes') {
+      ScriptApp.deleteTrigger(t);
+      count++;
+    }
+  });
+  Logger.log('Triggers de recurrentes eliminados: ' + count);
 }
