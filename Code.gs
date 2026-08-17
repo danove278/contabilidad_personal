@@ -1750,14 +1750,20 @@ function agregarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, destinata
   try {
     descripcion = String(descripcion || '').trim();
     montoOriginal = parseFloat(montoOriginal);
-    pagoMensual = parseFloat(pagoMensual);
-    diaMes = parseInt(diaMes, 10);
+    pagoMensual = parseFloat(pagoMensual) || 0;
+    diaMes = parseInt(diaMes, 10) || 0;
     destinatario = String(destinatario || '').trim();
 
     if (!descripcion) return { success: false, message: 'Falta descripción' };
     if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
-    if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Pago mensual inválido' };
-    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes debe estar entre 1 y 28' };
+    // Pago mensual y día solo son obligatorios cuando NO hay destinatario
+    // (con destinatario, el email de Chase decide el monto y la fecha)
+    if (!destinatario) {
+      if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Falta pago mensual (o configura un Destinatario para actualizar desde emails)' };
+      if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes debe estar entre 1 y 28' };
+    } else if (diaMes && (diaMes < 1 || diaMes > 28)) {
+      return { success: false, message: 'Día del mes debe estar entre 1 y 28' };
+    }
 
     var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var sheet = obtenerHojaDeudas(ss);
@@ -1788,14 +1794,18 @@ function actualizarDeuda(descripcion, montoOriginal, pagoMensual, diaMes, activa
   try {
     descripcion = String(descripcion || '').trim();
     montoOriginal = parseFloat(montoOriginal);
-    pagoMensual = parseFloat(pagoMensual);
-    diaMes = parseInt(diaMes, 10);
+    pagoMensual = parseFloat(pagoMensual) || 0;
+    diaMes = parseInt(diaMes, 10) || 0;
     destinatario = String(destinatario || '').trim();
 
     if (!descripcion) return { success: false, message: 'Falta descripción' };
     if (!montoOriginal || montoOriginal <= 0) return { success: false, message: 'Monto original inválido' };
-    if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Pago mensual inválido' };
-    if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes 1-28' };
+    if (!destinatario) {
+      if (!pagoMensual || pagoMensual <= 0) return { success: false, message: 'Falta pago mensual (o configura un Destinatario)' };
+      if (!diaMes || diaMes < 1 || diaMes > 28) return { success: false, message: 'Día del mes 1-28' };
+    } else if (diaMes && (diaMes < 1 || diaMes > 28)) {
+      return { success: false, message: 'Día del mes 1-28' };
+    }
 
     var ss = SpreadsheetApp.openById(getSpreadsheetId());
     var sheet = obtenerHojaDeudas(ss);

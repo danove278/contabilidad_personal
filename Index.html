@@ -2316,19 +2316,33 @@
       inpDesc.placeholder = 'Descripción (ej: Laptop, Wells Fargo negocio)';
       form.appendChild(inpDesc);
 
+      var inpMonto = document.createElement('input');
+      inpMonto.type = 'number';
+      inpMonto.placeholder = 'Monto total (ej: 4264.15)';
+      inpMonto.step = '0.01';
+      inpMonto.min = '0.01';
+      form.appendChild(inpMonto);
+
+      var inpDest = document.createElement('input');
+      inpDest.type = 'text';
+      inpDest.placeholder = 'Destinatario Chase (ej: WF CREDIT CARD)';
+      inpDest.style.marginTop = '8px';
+      form.appendChild(inpDest);
+
+      var noteDest = document.createElement('div');
+      noteDest.style.fontSize = '11px';
+      noteDest.style.color = 'var(--text-light)';
+      noteDest.style.marginTop = '4px';
+      noteDest.style.marginBottom = '10px';
+      noteDest.innerHTML = 'Si lo configuras, el saldo se actualiza solo con cada transferencia. Pago mensual y día abajo NO se usan.';
+      form.appendChild(noteDest);
+
       var row = document.createElement('div');
       row.className = 'deuda-edit-row';
 
-      var inpMonto = document.createElement('input');
-      inpMonto.type = 'number';
-      inpMonto.placeholder = 'Monto total';
-      inpMonto.step = '0.01';
-      inpMonto.min = '0.01';
-      row.appendChild(inpMonto);
-
       var inpMens = document.createElement('input');
       inpMens.type = 'number';
-      inpMens.placeholder = 'Pago mensual';
+      inpMens.placeholder = 'Pago mensual (si no hay dest.)';
       inpMens.step = '0.01';
       inpMens.min = '0.01';
       row.appendChild(inpMens);
@@ -2340,13 +2354,11 @@
       inpDia.max = '28';
       row.appendChild(inpDia);
 
-      form.appendChild(row);
+      // Placeholder invisible para mantener el grid 3-col
+      var spacer = document.createElement('div');
+      row.appendChild(spacer);
 
-      var inpDest = document.createElement('input');
-      inpDest.type = 'text';
-      inpDest.placeholder = 'Destinatario Chase (opcional, ej: WF CREDIT CARD)';
-      inpDest.style.marginTop = '8px';
-      form.appendChild(inpDest);
+      form.appendChild(row);
 
       var btn = document.createElement('button');
       btn.textContent = 'Agregar deuda';
@@ -2423,10 +2435,13 @@
 
       var meta = document.createElement('div');
       meta.className = 'deuda-meta';
-      var metaHtml = 'Pago mensual: <strong>' + formatUSD(d.pagoMensual) + '</strong> · Día <strong>' + d.diaMes + '</strong>' +
-        (d.ultimoPago ? ' · Último pago ' + d.ultimoPago : '');
+      var metaHtml;
       if (d.destinatario) {
-        metaHtml += '<br><span style="color:var(--primary);">🔗 Vinculada a transferencia: <strong>' + d.destinatario + '</strong></span>';
+        metaHtml = '<span style="color:var(--primary);">🔗 Actualiza desde transferencias a <strong>' + d.destinatario + '</strong></span>';
+        if (d.ultimoPago) metaHtml += '<br>Último pago: <strong>' + d.ultimoPago + '</strong>';
+      } else {
+        metaHtml = 'Pago mensual: <strong>' + formatUSD(d.pagoMensual) + '</strong> · Día <strong>' + d.diaMes + '</strong>' +
+          (d.ultimoPago ? ' · Último pago ' + d.ultimoPago : '');
       }
       meta.innerHTML = metaHtml;
       item.appendChild(meta);
@@ -2530,13 +2545,16 @@
     function doAgregarDeuda(inpDesc, inpMonto, inpMens, inpDia, inpDest) {
       var desc = (inpDesc.value || '').trim();
       var monto = parseFloat(inpMonto.value);
-      var mens = parseFloat(inpMens.value);
-      var dia = parseInt(inpDia.value, 10);
+      var mens = parseFloat(inpMens.value) || 0;
+      var dia = parseInt(inpDia.value, 10) || 0;
       var dest = inpDest ? (inpDest.value || '').trim() : '';
       if (!desc) { showToast('Falta descripción', 'error'); inpDesc.focus(); return; }
       if (!monto || monto <= 0) { showToast('Monto inválido', 'error'); inpMonto.focus(); return; }
-      if (!mens || mens <= 0) { showToast('Pago mensual inválido', 'error'); inpMens.focus(); return; }
-      if (!dia || dia < 1 || dia > 28) { showToast('Día del mes: 1-28', 'error'); inpDia.focus(); return; }
+      // Pago mensual y día solo obligatorios si NO hay destinatario
+      if (!dest) {
+        if (!mens || mens <= 0) { showToast('Falta pago mensual (o pon un Destinatario Chase)', 'error'); inpMens.focus(); return; }
+        if (!dia || dia < 1 || dia > 28) { showToast('Día del mes: 1-28', 'error'); inpDia.focus(); return; }
+      }
 
       if (previewLocal) {
         deudas.push({
