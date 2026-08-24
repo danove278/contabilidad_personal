@@ -2646,3 +2646,162 @@ function eliminarTriggerRecurrentes() {
   });
   Logger.log('Triggers de recurrentes eliminados: ' + count);
 }
+
+/* ============================================================
+   RESUMEN EN VIVO PARA EL DASHBOARD DE LA APP
+   ============================================================
+
+   Lee directo de Movimientos (fuente de la verdad), agrupa por
+   año-mes → categoría → subcategoría → descripción (elemento).
+   El frontend consume estas dos funciones para mostrar el resumen
+   sin depender de la hoja Dashboard.
+   ============================================================ */
+
+/**
+ * Retorna la lista de meses con al menos 1 movimiento registrado.
+ * Formato: [{ anio, mes, key: '2026-08', label: 'Agosto 2026' }]
+ * Ordenados descendente (más recientes primero).
+ */
+function obtenerMesesConDatos() {
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaMovimientos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var fechas = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
+  var vistos = {};
+  var resultado = [];
+
+  fechas.forEach(function(fila) {
+    var f = fila[0];
+    if (!(f instanceof Date)) return;
+    var anio = f.getFullYear();
+    var mes = f.getMonth();
+    var key = anio + '-' + ('0' + (mes + 1)).slice(-2);
+    if (!vistos[key]) {
+      vistos[key] = true;
+      resultado.push({
+        anio: anio,
+        mes: mes + 1, // 1-based para el frontend
+        key: key,
+        label: MESES[mes] + ' ' + anio
+      });
+    }
+  });
+
+  // Descendente: más reciente primero
+  resultado.sort(function(a, b) { return b.key.localeCompare(a.key); });
+  return resultado;
+}
+
+/**
+ * Retorna el resumen agrupado de un mes específico.
+ * Estructura:
+ * {
+ *   anio, mes, label,
+ *   totalIngresos, totalGastos, balance,
+ *   totalesPorCategoria: { 'Ingresos': N, 'Ahorro': N, ... },
+ *   categorias: {
+ *     'Gastos Fijos': {
+ *       total: N,
+ *       subcategorias: {
+ *         'Alquiler': {
+ *           total: N,
+ *           count: N,
+ *           elementos: [ { nombre: 'X', total: N, count: N }, ... ]
+ *         }
+ *       }
+ *     }
+ *   }
+ * }
+ */
+function obtenerResumenMes(anio, mes) {
+  anio = parseInt(anio, 10);
+  mes = parseInt(mes, 10); // 1-based
+  if (!anio || !mes || mes < 1 || mes > 12) {
+    return { error: 'Año o mes inválido' };
+  }
+
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaMovimientos(ss);
+  var lastRow = sheet.getLastRow();
+
+  var resultado = {
+    anio: anio,
+    mes: mes,
+    label: MESES[mes - 1] + ' ' + anio,
+    totalIngresos: 0,
+    totalGastos: 0,
+    balance: 0,
+    totalesPorCategoria: {},
+    categorias: {}
+  };
+
+  // Inicializar cada categoría
+  CATEGORIAS.forEach(function(cat) {
+    resultado.totalesPorCategoria[cat] = 0;
+    resultado.categorias[cat] = { total: 0, subcategorias: {} };
+  });
+
+  if (lastRow < 2) return resultado;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
+
+  data.forEach(function(fila) {
+    var fechaMov = fila[1];
+    if (!(fechaMov instanceof Date)) return;
+    if (fechaMov.getFullYear() !== anio) return;
+    if (fechaMov.getMonth() + 1 !== mes) return;
+
+    var categoria = String(fila[2]).trim();
+    var subcategoria = String(fila[3]).trim();
+    var monto = parseFloat(fila[4]) || 0;
+    var descripcion = String(fila[5]).trim();
+
+    if (!categoria || CATEGORIAS.indexOf(categoria) === -1) return;
+
+    // Totales por categoría
+    resultado.totalesPorCategoria[categoria] += monto;
+    resultado.categorias[categoria].total += monto;
+
+    // Agrupar por subcategoría
+    var sub = subcategoria || '(Sin subcategoría)';
+    if (!resultado.categorias[categoria].subcategorias[sub]) {
+      resultado.categorias[categoria].subcategorias[sub] = {
+        total: 0, count: 0, elementos: {}
+      };
+    }
+    var subObj = resultado.categorias[categoria].subcategorias[sub];
+    subObj.total += monto;
+    subObj.count++;
+
+    // Agrupar por descripción (elemento)
+    var elem = descripcion || '(Sin descripción)';
+    if (!subObj.elementos[elem]) {
+      subObj.elementos[elem] = { nombre: elem, total: 0, count: 0 };
+    }
+    subObj.elementos[elem].total += monto;
+    subObj.elementos[elem].count++;
+  });
+
+  // Convertir elementos de objeto a array ordenado por total desc
+  Object.keys(resultado.categorias).forEach(function(cat) {
+    var subcats = resultado.categorias[cat].subcategorias;
+    Object.keys(subcats).forEach(function(sub) {
+      var elemsArr = Object.keys(subcats[sub].elementos).map(function(k) {
+        return subcats[sub].elementos[k];
+      });
+      elemsArr.sort(function(a, b) { return b.total - a.total; });
+      subcats[sub].elementos = elemsArr;
+    });
+  });
+
+  resultado.totalIngresos = resultado.totalesPorCategoria['Ingresos'] || 0;
+  var gastosFijos = resultado.totalesPorCategoria['Gastos Fijos'] || 0;
+  var gastosVar = resultado.totalesPorCategoria['Gastos Variables'] || 0;
+  var deudas = resultado.totalesPorCategoria['Deudas'] || 0;
+  resultado.totalGastos = gastosFijos + gastosVar + deudas;
+  resultado.balance = resultado.totalIngresos - resultado.totalGastos - (resultado.totalesPorCategoria['Ahorro'] || 0);
+
+  return resultado;
+}

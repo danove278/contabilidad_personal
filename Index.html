@@ -354,6 +354,198 @@
 
     .settings-btn:hover { background: rgba(255,255,255,0.3); }
 
+    .settings-btn.resumen-btn {
+      right: 66px;
+      font-size: 18px;
+    }
+
+    /* Dashboard modal styles */
+    .resumen-mes-selector {
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      font-size: 15px;
+      font-family: inherit;
+      background: var(--card);
+      margin-bottom: 14px;
+    }
+
+    .resumen-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .resumen-stat {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 10px;
+      text-align: center;
+    }
+
+    .resumen-stat-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .resumen-stat-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .resumen-stat-value.positive { color: var(--success); }
+    .resumen-stat-value.negative { color: var(--danger); }
+
+    .resumen-cat {
+      background: var(--card);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .resumen-cat-header {
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .resumen-cat-header:hover { background: rgba(0,0,0,0.02); }
+
+    .resumen-cat-chevron {
+      margin-right: 8px;
+      transition: transform 0.15s;
+      font-size: 12px;
+      color: var(--text-light);
+    }
+
+    .resumen-cat.expanded .resumen-cat-chevron {
+      transform: rotate(90deg);
+    }
+
+    .resumen-cat-color {
+      width: 8px;
+      height: 24px;
+      border-radius: 3px;
+      margin-right: 10px;
+    }
+
+    .resumen-cat-name {
+      flex: 1;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .resumen-cat-total {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .resumen-cat-bar {
+      height: 3px;
+      background: rgba(0,0,0,0.05);
+      overflow: hidden;
+    }
+
+    .resumen-cat-bar-fill {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+
+    .resumen-cat-body {
+      display: none;
+      padding: 6px 14px 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .resumen-cat.expanded .resumen-cat-body {
+      display: block;
+    }
+
+    .resumen-sub {
+      margin-top: 6px;
+    }
+
+    .resumen-sub-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: var(--bg);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .resumen-sub-header:hover { background: rgba(0,0,0,0.04); }
+
+    .resumen-sub-header .sub-name {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .resumen-sub-count {
+      font-size: 10px;
+      color: var(--text-light);
+      background: rgba(0,0,0,0.06);
+      padding: 2px 6px;
+      border-radius: 8px;
+      margin-right: 8px;
+    }
+
+    .resumen-sub-total {
+      font-weight: 700;
+    }
+
+    .resumen-elementos {
+      display: none;
+      padding: 4px 10px 4px 22px;
+    }
+
+    .resumen-sub.expanded .resumen-elementos {
+      display: block;
+    }
+
+    .resumen-sub .sub-chevron {
+      display: inline-block;
+      margin-right: 6px;
+      color: var(--text-light);
+      font-size: 10px;
+      transition: transform 0.15s;
+    }
+
+    .resumen-sub.expanded .sub-chevron {
+      transform: rotate(90deg);
+    }
+
+    .resumen-elemento {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 12px;
+      color: var(--text-light);
+    }
+
+    .resumen-elemento-nombre { flex: 1; }
+    .resumen-elemento-total { color: var(--text); font-weight: 500; }
+
+    .resumen-empty {
+      text-align: center;
+      padding: 30px 20px;
+      color: var(--text-light);
+      font-style: italic;
+    }
+
     /* Modal */
     .modal-backdrop {
       position: fixed;
@@ -1115,6 +1307,7 @@
         font-size: 13px;
       }
 
+      .settings-btn.resumen-btn { right: 58px; font-size: 16px; }
       .settings-btn {
         right: 12px;
         width: 36px;
@@ -1132,7 +1325,19 @@
   <div class="header">
     <h1>Registro de Gastos</h1>
     <p>Registra tus movimientos financieros</p>
+    <button class="settings-btn resumen-btn" title="Ver resumen" onclick="abrirResumen()">📊</button>
     <button class="settings-btn" title="Configurar" onclick="abrirConfig()">&#9881;</button>
+  </div>
+
+  <!-- Modal de resumen -->
+  <div class="modal-backdrop" id="modalResumen" onclick="cerrarResumenFondo(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Resumen</h2>
+        <button class="modal-close" onclick="cerrarResumen()" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body" id="modalResumenBody"></div>
+    </div>
   </div>
 
   <!-- Modal de configuración -->
@@ -3387,6 +3592,269 @@
           showToast('Error: ' + err.message, 'error');
         })
         .sincronizarAhora();
+    }
+
+    /* ============================================================
+       RESUMEN INTERACTIVO (dashboard en la app)
+       ============================================================ */
+
+    var resumenMesActual = '';
+    var resumenExpandidos = {};
+
+    function abrirResumen() {
+      document.getElementById('modalResumen').classList.add('open');
+      cargarResumen();
+    }
+
+    function cerrarResumen() {
+      document.getElementById('modalResumen').classList.remove('open');
+    }
+
+    function cerrarResumenFondo(e) {
+      if (e.target.id === 'modalResumen') cerrarResumen();
+    }
+
+    function cargarResumen() {
+      var body = document.getElementById('modalResumenBody');
+      body.innerHTML = '<div class="resumen-empty">Cargando...</div>';
+
+      if (previewLocal) {
+        // Preview: datos ficticios
+        var mesesFake = [
+          { anio: 2026, mes: 8, key: '2026-08', label: 'Agosto 2026' },
+          { anio: 2026, mes: 7, key: '2026-07', label: 'Julio 2026' }
+        ];
+        resumenMesActual = resumenMesActual || mesesFake[0].key;
+        renderResumen(mesesFake, {
+          anio: 2026, mes: 8, label: 'Agosto 2026',
+          totalIngresos: 3000, totalGastos: 1800, balance: 1000,
+          totalesPorCategoria: { 'Ingresos': 3000, 'Ahorro': 200, 'Deudas': 0, 'Gastos Fijos': 1200, 'Gastos Variables': 600 },
+          categorias: {
+            'Ingresos': { total: 3000, subcategorias: { 'Depósito directo': { total: 3000, count: 2, elementos: [{ nombre: 'Depósito directo', total: 3000, count: 2 }] } } },
+            'Ahorro': { total: 200, subcategorias: {} },
+            'Deudas': { total: 0, subcategorias: {} },
+            'Gastos Fijos': { total: 1200, subcategorias: {
+              'Alquiler': { total: 1000, count: 1, elementos: [{ nombre: 'LANDLORD JOHN', total: 1000, count: 1 }] },
+              'Servicios': { total: 200, count: 3, elementos: [{ nombre: 'AT&T', total: 100, count: 1 }, { nombre: 'Gym', total: 100, count: 2 }] }
+            }},
+            'Gastos Variables': { total: 600, subcategorias: {
+              'Comida': { total: 400, count: 8, elementos: [{ nombre: 'STARBUCKS', total: 250, count: 5 }, { nombre: 'UBER EATS', total: 150, count: 3 }] },
+              'Suscripciones': { total: 200, count: 4, elementos: [] }
+            }}
+          }
+        });
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(meses) {
+          if (!meses || meses.length === 0) {
+            body.innerHTML = '<div class="resumen-empty">Sin movimientos registrados todavía.</div>';
+            return;
+          }
+          if (!resumenMesActual || !meses.some(function(m) { return m.key === resumenMesActual; })) {
+            resumenMesActual = meses[0].key;
+          }
+          var partes = resumenMesActual.split('-');
+          google.script.run
+            .withSuccessHandler(function(data) {
+              renderResumen(meses, data);
+            })
+            .withFailureHandler(function(err) {
+              body.innerHTML = '<div class="resumen-empty">Error: ' + err.message + '</div>';
+            })
+            .obtenerResumenMes(parseInt(partes[0], 10), parseInt(partes[1], 10));
+        })
+        .withFailureHandler(function(err) {
+          body.innerHTML = '<div class="resumen-empty">Error cargando meses: ' + err.message + '</div>';
+        })
+        .obtenerMesesConDatos();
+    }
+
+    function renderResumen(meses, data) {
+      var body = document.getElementById('modalResumenBody');
+      body.innerHTML = '';
+
+      // Selector de mes
+      var sel = document.createElement('select');
+      sel.className = 'resumen-mes-selector';
+      meses.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.key;
+        opt.textContent = m.label;
+        if (m.key === resumenMesActual) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = function() {
+        resumenMesActual = sel.value;
+        cargarResumen();
+      };
+      body.appendChild(sel);
+
+      // Summary cards
+      var summary = document.createElement('div');
+      summary.className = 'resumen-summary';
+      summary.appendChild(makeStat('Ingresos', formatUSD(data.totalIngresos), 'positive'));
+      summary.appendChild(makeStat('Gastos', formatUSD(data.totalGastos), 'negative'));
+      summary.appendChild(makeStat('Balance', formatUSD(data.balance), data.balance >= 0 ? 'positive' : 'negative'));
+      body.appendChild(summary);
+
+      // Categorías
+      var maxTotal = 0;
+      CATEGORIAS_ORDEN.forEach(function(cat) {
+        var t = (data.categorias[cat] && data.categorias[cat].total) || 0;
+        if (t > maxTotal) maxTotal = t;
+      });
+
+      CATEGORIAS_ORDEN.forEach(function(cat) {
+        var catData = data.categorias[cat] || { total: 0, subcategorias: {} };
+        body.appendChild(renderCatCard(cat, catData, maxTotal));
+      });
+    }
+
+    function makeStat(label, value, className) {
+      var s = document.createElement('div');
+      s.className = 'resumen-stat';
+      var l = document.createElement('div');
+      l.className = 'resumen-stat-label';
+      l.textContent = label;
+      var v = document.createElement('div');
+      v.className = 'resumen-stat-value' + (className ? ' ' + className : '');
+      v.textContent = value;
+      s.appendChild(l);
+      s.appendChild(v);
+      return s;
+    }
+
+    function renderCatCard(cat, catData, maxTotal) {
+      var card = document.createElement('div');
+      card.className = 'resumen-cat';
+      var expKey = 'cat::' + cat;
+      if (resumenExpandidos[expKey]) card.classList.add('expanded');
+
+      var header = document.createElement('div');
+      header.className = 'resumen-cat-header';
+      header.onclick = function() {
+        resumenExpandidos[expKey] = !resumenExpandidos[expKey];
+        card.classList.toggle('expanded');
+      };
+
+      var chev = document.createElement('span');
+      chev.className = 'resumen-cat-chevron';
+      chev.textContent = '▶';
+      header.appendChild(chev);
+
+      var color = document.createElement('div');
+      color.className = 'resumen-cat-color';
+      color.style.background = COLORES_CAT[cat] || '#bbb';
+      header.appendChild(color);
+
+      var name = document.createElement('div');
+      name.className = 'resumen-cat-name';
+      name.textContent = cat;
+      header.appendChild(name);
+
+      var total = document.createElement('div');
+      total.className = 'resumen-cat-total';
+      total.textContent = formatUSD(catData.total);
+      header.appendChild(total);
+
+      card.appendChild(header);
+
+      // Barra de proporción
+      var bar = document.createElement('div');
+      bar.className = 'resumen-cat-bar';
+      var barFill = document.createElement('div');
+      barFill.className = 'resumen-cat-bar-fill';
+      barFill.style.background = COLORES_CAT[cat] || '#bbb';
+      barFill.style.width = maxTotal > 0 ? Math.round((catData.total / maxTotal) * 100) + '%' : '0%';
+      bar.appendChild(barFill);
+      card.appendChild(bar);
+
+      // Body con subcategorías
+      var body = document.createElement('div');
+      body.className = 'resumen-cat-body';
+
+      var subKeys = Object.keys(catData.subcategorias);
+      if (subKeys.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'resumen-empty';
+        empty.style.padding = '10px';
+        empty.textContent = 'Sin movimientos este mes.';
+        body.appendChild(empty);
+      } else {
+        // Ordenar subcategorías por total desc
+        subKeys.sort(function(a, b) { return catData.subcategorias[b].total - catData.subcategorias[a].total; });
+        subKeys.forEach(function(sub) {
+          body.appendChild(renderSubCard(cat, sub, catData.subcategorias[sub]));
+        });
+      }
+      card.appendChild(body);
+      return card;
+    }
+
+    function renderSubCard(cat, sub, subData) {
+      var wrap = document.createElement('div');
+      wrap.className = 'resumen-sub';
+      var expKey = 'sub::' + cat + '::' + sub;
+      if (resumenExpandidos[expKey]) wrap.classList.add('expanded');
+
+      var hasElems = subData.elementos && subData.elementos.length > 0;
+
+      var header = document.createElement('div');
+      header.className = 'resumen-sub-header';
+      if (hasElems) {
+        header.onclick = function() {
+          resumenExpandidos[expKey] = !resumenExpandidos[expKey];
+          wrap.classList.toggle('expanded');
+        };
+        header.style.cursor = 'pointer';
+      } else {
+        header.style.cursor = 'default';
+      }
+
+      var nameWrap = document.createElement('span');
+      nameWrap.className = 'sub-name';
+      if (hasElems) {
+        var chev = document.createElement('span');
+        chev.className = 'sub-chevron';
+        chev.textContent = '▶';
+        nameWrap.appendChild(chev);
+      }
+      nameWrap.appendChild(document.createTextNode(sub));
+      header.appendChild(nameWrap);
+
+      var count = document.createElement('span');
+      count.className = 'resumen-sub-count';
+      count.textContent = subData.count + ' mov';
+      header.appendChild(count);
+
+      var total = document.createElement('span');
+      total.className = 'resumen-sub-total';
+      total.textContent = formatUSD(subData.total);
+      header.appendChild(total);
+      wrap.appendChild(header);
+
+      if (hasElems) {
+        var elems = document.createElement('div');
+        elems.className = 'resumen-elementos';
+        subData.elementos.forEach(function(el) {
+          var e = document.createElement('div');
+          e.className = 'resumen-elemento';
+          var n = document.createElement('span');
+          n.className = 'resumen-elemento-nombre';
+          n.textContent = el.nombre + (el.count > 1 ? ' × ' + el.count : '');
+          var t = document.createElement('span');
+          t.className = 'resumen-elemento-total';
+          t.textContent = formatUSD(el.total);
+          e.appendChild(n);
+          e.appendChild(t);
+          elems.appendChild(e);
+        });
+        wrap.appendChild(elems);
+      }
+
+      return wrap;
     }
   </script>
 
