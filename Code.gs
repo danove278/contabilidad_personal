@@ -111,11 +111,15 @@ var GMAIL_QUERY = 'label:Banco/Alertas -label:Banco/Procesado newer_than:7d';
 var LABEL_PROCESADO = 'Banco/Procesado';
 
 // Verificación defensiva del remitente real antes de parsear
-var REMITENTES_PERMITIDOS = ['chase.com', 'apple.com'];
+var REMITENTES_PERMITIDOS = ['chase.com', 'apple.com', 'google.com'];
 
 // Dedup: totales Apple recientes para saltar el cargo consolidado de Chase (APPLE.COM/BILL)
 var APPLE_CHARGES_KEY = 'APPLE_CHARGES';
 var APPLE_CHARGES_MAX = 30;
+
+// Dedup: totales Google Play recientes para saltar el cargo consolidado de Chase (GOOGLE *X)
+var GOOGLE_CHARGES_KEY = 'GOOGLE_CHARGES';
+var GOOGLE_CHARGES_MAX = 30;
 
 // Diccionario para parsear meses abreviados en español (Chase manda en español)
 var MESES_ES_ABR = {
@@ -1357,24 +1361,24 @@ function intentarRegistrarDeposito(parsed, emailId) {
   return { registrado: true };
 }
 
-/* --- Dedup con cargo consolidado APPLE.COM/BILL de Chase --- */
+/* --- Dedup con cargos consolidados (Apple, Google) de Chase --- */
 
-function _getAppleCharges() {
-  var raw = PropertiesService.getScriptProperties().getProperty(APPLE_CHARGES_KEY);
+function _getChargesGenerico(key) {
+  var raw = PropertiesService.getScriptProperties().getProperty(key);
   if (!raw) return [];
   try { return JSON.parse(raw); } catch (e) { return []; }
 }
 
-function _registrarCargoAppleEsperado(total, fecha) {
-  var charges = _getAppleCharges();
+function _registrarCargoEsperado(key, max, total, fecha) {
+  var charges = _getChargesGenerico(key);
   charges.push({ total: total, fecha: fecha, ts: Date.now() });
-  if (charges.length > APPLE_CHARGES_MAX) charges = charges.slice(-APPLE_CHARGES_MAX);
-  PropertiesService.getScriptProperties().setProperty(APPLE_CHARGES_KEY, JSON.stringify(charges));
+  if (charges.length > max) charges = charges.slice(-max);
+  PropertiesService.getScriptProperties().setProperty(key, JSON.stringify(charges));
 }
 
-function _matcheaCargoAppleReciente(total) {
-  var charges = _getAppleCharges();
-  var tolerancia = 0.01; // centavos
+function _matcheaCargoReciente(key, total) {
+  var charges = _getChargesGenerico(key);
+  var tolerancia = 0.01;
   var ventanaMs = 5 * 24 * 3600 * 1000; // 5 días
   var ahora = Date.now();
   for (var i = 0; i < charges.length; i++) {
@@ -1384,6 +1388,20 @@ function _matcheaCargoAppleReciente(total) {
     }
   }
   return false;
+}
+
+// Wrappers específicos (compat con código existente)
+function _registrarCargoAppleEsperado(total, fecha) {
+  _registrarCargoEsperado(APPLE_CHARGES_KEY, APPLE_CHARGES_MAX, total, fecha);
+}
+function _matcheaCargoAppleReciente(total) {
+  return _matcheaCargoReciente(APPLE_CHARGES_KEY, total);
+}
+function _registrarCargoGoogleEsperado(total, fecha) {
+  _registrarCargoEsperado(GOOGLE_CHARGES_KEY, GOOGLE_CHARGES_MAX, total, fecha);
+}
+function _matcheaCargoGoogleReciente(total) {
+  return _matcheaCargoReciente(GOOGLE_CHARGES_KEY, total);
 }
 
 /**
@@ -1500,6 +1518,132 @@ function procesarAppleRecibo(parsed, emailId, threadUrl) {
   // Registrar el total esperado para dedup con Chase APPLE.COM/BILL
   if (parsed.total > 0) {
     _registrarCargoAppleEsperado(parsed.total, parsed.fecha);
+  }
+
+  if (emailId) marcarEmailProcesado(emailId);
+  return { registrado: registrados > 0, registrados: registrados, pendientes: pendientes };
+}
+
+/**
+ * Parser del email de recibo de Google Play.
+ * Formato: "El recibo de tu pedido de Google Play..."
+ * Retorna { fecha, ultimos4, items: [{ nombre, monto }], total } o null.
+ */
+function parsearEmailGooglePlayRecibo(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n');
+
+  // Detectar recibo Google Play
+  if (!/recibo.*Google Play|Google Play.*recibo/i.test(text)) return null;
+
+  // Tarjeta: "Visa-NNNN" (formato Google es distinto del de Apple)
+  var mCard = text.match(/(?:Visa|Mastercard|Amex|Discover)[\-\s]*[•·\.\*]*\s*(\d{4})/i);
+  var ultimos4 = mCard ? mCard[1] : '';
+
+  // Fecha "23 ago 2026" o "Agosto 23, 2026" — Google usa formato corto "DD MMM YYYY"
+  var fecha = null;
+  var mFechaCorta = text.match(/Fecha del pedido:\s*(\d{1,2})\s+([a-záéíóú]{3,4})\.?\s*(\d{4})/i);
+  if (mFechaCorta) {
+    var mes3 = mFechaCorta[2].toLowerCase().substring(0, 3);
+    var mesNum = MESES_ES_ABR[mes3];
+    if (mesNum !== undefined) {
+      fecha = mFechaCorta[3] + '-' + ('0' + (mesNum + 1)).slice(-2) + '-' + ('0' + parseInt(mFechaCorta[1])).slice(-2);
+    }
+  }
+  if (!fecha) {
+    var mFechaLarga = text.match(/([Ee]nero|[Ff]ebrero|[Mm]arzo|[Aa]bril|[Mm]ayo|[Jj]unio|[Jj]ulio|[Aa]gosto|[Ss]eptiembre|[Oo]ctubre|[Nn]oviembre|[Dd]iciembre)\s+(\d{1,2}),?\s*(\d{4})/);
+    if (mFechaLarga) {
+      var mesLargoNum = MESES_ES_LARGO[mFechaLarga[1].toLowerCase()];
+      if (mesLargoNum !== undefined) {
+        fecha = mFechaLarga[3] + '-' + ('0' + (mesLargoNum + 1)).slice(-2) + '-' + ('0' + parseInt(mFechaLarga[2])).slice(-2);
+      }
+    }
+  }
+  if (!fecha && emailDate) {
+    fecha = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  // Total: "Total: $NN.NN por mes" o "Total: $NN.NN"
+  var mTotal = text.match(/Total:\s*\$\s*([\d,]+\.\d{2})/i);
+  var total = mTotal ? parseFloat(mTotal[1].replace(/,/g, '')) : 0;
+
+  // Extraer items — Google Play usa tabla "Artículo ... Precio"
+  // Item line: "NOMBRE ... $NN.NN por mes" (o "$NN.NN")
+  var items = [];
+  var seen = {};
+  var itemPattern = /^([A-Z][^\n$]+?)\s+\$\s*([\d,]+\.\d{2})(?:\s+por\s+(?:mes|año|semana))?\s*$/gim;
+  var match;
+  while ((match = itemPattern.exec(text)) !== null) {
+    var nombre = match[1].trim();
+    var monto = parseFloat(match[2].replace(/,/g, ''));
+    if (!nombre || nombre.length < 2 || nombre.length > 120) continue;
+    if (!monto || monto <= 0) continue;
+    // Skip líneas que son "Total", "Subtotal", "Impuesto"
+    if (/^(Total|Subtotal|Impuesto|Total del pedido)/i.test(nombre)) continue;
+    var key = nombre + '::' + monto;
+    if (seen[key]) continue;
+    seen[key] = true;
+    items.push({ nombre: nombre, monto: monto });
+  }
+
+  // Si no encontró items pero sí total, usar el total como single item con nombre genérico
+  // buscando "Artículo" cerca
+  if (items.length === 0 && total > 0) {
+    var mArt = text.match(/Se renovó tu suscripción a\s+([^\n]+?)\s+en Google Play/i);
+    var nombreArt = mArt ? mArt[1].trim() : 'Google Play';
+    items.push({ nombre: nombreArt, monto: total });
+  }
+
+  if (items.length === 0) return null;
+
+  return {
+    fecha: fecha,
+    ultimos4: ultimos4,
+    items: items,
+    total: total || items.reduce(function(s, i) { return s + i.monto; }, 0)
+  };
+}
+
+/**
+ * Procesa un recibo Google Play: registra cada item por separado.
+ */
+function procesarGooglePlayRecibo(parsed, emailId, threadUrl) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
+  var registrados = 0;
+  var pendientes = 0;
+  parsed.items.forEach(function(item) {
+    var pseudoParsed = {
+      fecha: parsed.fecha,
+      elementoRaw: item.nombre,
+      ultimos4: parsed.ultimos4,
+      monto: item.monto
+    };
+    var mapeoElem = buscarMapeoElemento(item.nombre);
+    if (!mapeoElem) {
+      agregarAPendientes(pseudoParsed, emailId + '-' + item.nombre, threadUrl,
+        'Google Play sub sin mapeo: ' + item.nombre + ' (crea un elemento con este nombre)');
+      pendientes++;
+      return;
+    }
+    var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
+    var metodoPago = mapeoTarj ? ('Tarjeta ' + mapeoTarj.tipo) : 'Tarjeta Crédito';
+    var alias = mapeoTarj && mapeoTarj.alias ? mapeoTarj.alias : 'Google Play';
+    registrarMovimiento({
+      fecha: parsed.fecha,
+      categoria: mapeoElem.categoria,
+      subcategoria: mapeoElem.subcategoria,
+      monto: item.monto,
+      descripcion: mapeoElem.elemento,
+      metodoPago: metodoPago,
+      notas: '[Auto Google Play] ' + alias + ' ...' + parsed.ultimos4
+    });
+    registrados++;
+  });
+
+  if (parsed.total > 0) {
+    _registrarCargoGoogleEsperado(parsed.total, parsed.fecha);
   }
 
   if (emailId) marcarEmailProcesado(emailId);
@@ -1644,6 +1788,11 @@ function intentarRegistrar(parsed, emailId, threadUrl) {
     if (emailId) marcarEmailProcesado(emailId);
     return { registrado: false, yaProcesado: true };
   }
+  // Dedup: si es GOOGLE *X y matchea un total de recibo Google Play reciente, skip
+  if (/^GOOGLE[\s\*]/i.test(parsed.elementoRaw) && _matcheaCargoGoogleReciente(parsed.monto)) {
+    if (emailId) marcarEmailProcesado(emailId);
+    return { registrado: false, yaProcesado: true };
+  }
 
   var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
   var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
@@ -1771,7 +1920,21 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 5) Parser Chase 4 Pagos - setup (agrega a la queue)
+        // 5) Parser recibo Google Play
+        var gpRec = parsearEmailGooglePlayRecibo(body, msg.getDate());
+        if (gpRec) {
+          var resG = procesarGooglePlayRecibo(gpRec, msg.getId(), thread.getPermalink());
+          if (resG.yaProcesado) stats.ignorados++;
+          else {
+            stats.registrados += resG.registrados || 0;
+            stats.pendientes += resG.pendientes || 0;
+          }
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
+        // 6) Parser Chase 4 Pagos - setup (agrega a la queue)
         var setup4p = parsearEmailChase4PagosSetup(body);
         if (setup4p && setup4p.numeroPlan) {
           agregar4Pagos(setup4p, msg.getId(), msg.getDate());
@@ -1781,7 +1944,7 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 6) Parser Chase 4 Pagos - recordatorio (silencioso)
+        // 7) Parser Chase 4 Pagos - recordatorio (silencioso)
         if (parsearEmailChase4PagosRecordatorio(body)) {
           stats.ignorados++;
           msg.markRead();
@@ -1964,6 +2127,22 @@ function testParserChaseDebito() {
 /**
  * Prueba el parser de transferencias de Chase.
  */
+function testParserGooglePlayRecibo() {
+  var body = 'El recibo de tu pedido de Google Play del 23 ago 2026\n\n' +
+             'Google Play\n\nGracias\n\n' +
+             'Número de pedido: SOP.3328-2989-1183-29226..18\n' +
+             'Fecha del pedido: 23 ago 2026 8:04:40 a.m. EDT\n\n' +
+             'Artículo Precio\n' +
+             'Google AI Plus (2 TB) (Google One) (de Google LLC) $9.99 por mes\n' +
+             'Suscripción con renovación automática\n\n' +
+             'Impuesto: $0.00\n' +
+             'Total: $9.99 por mes\n\n' +
+             'Forma de pago: Visa-7349';
+  var res = parsearEmailGooglePlayRecibo(body, new Date());
+  Logger.log('Test parser Google Play: ' + JSON.stringify(res));
+  // Esperado: 1 item con nombre y monto, ultimos4 7349
+}
+
 function testParserAppleRecibo() {
   var body = 'Tu recibo de Apple\n\n' +
              'Recibo\n\n' +

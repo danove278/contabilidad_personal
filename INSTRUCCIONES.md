@@ -86,7 +86,7 @@ Elige **una** de las dos opciones:
 1. En Apps Script, ve a **Implementar > Nueva implementación**
 2. Haz clic en el engranaje y selecciona **"Aplicación web"**
 3. Configura:
-   - **Descripción:** "Registro de Gastos v1.12.0"
+   - **Descripción:** "Registro de Gastos v1.13.0"
    - **Ejecutar como:** "Yo" (tu cuenta)
    - **Quién tiene acceso:** "Cualquier persona con cuenta de Google"
 4. Clic en **"Implementar"**
