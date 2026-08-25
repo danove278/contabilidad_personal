@@ -111,7 +111,11 @@ var GMAIL_QUERY = 'label:Banco/Alertas -label:Banco/Procesado newer_than:7d';
 var LABEL_PROCESADO = 'Banco/Procesado';
 
 // Verificación defensiva del remitente real antes de parsear
-var REMITENTES_PERMITIDOS = ['chase.com'];
+var REMITENTES_PERMITIDOS = ['chase.com', 'apple.com'];
+
+// Dedup: totales Apple recientes para saltar el cargo consolidado de Chase (APPLE.COM/BILL)
+var APPLE_CHARGES_KEY = 'APPLE_CHARGES';
+var APPLE_CHARGES_MAX = 30;
 
 // Diccionario para parsear meses abreviados en español (Chase manda en español)
 var MESES_ES_ABR = {
@@ -1353,6 +1357,155 @@ function intentarRegistrarDeposito(parsed, emailId) {
   return { registrado: true };
 }
 
+/* --- Dedup con cargo consolidado APPLE.COM/BILL de Chase --- */
+
+function _getAppleCharges() {
+  var raw = PropertiesService.getScriptProperties().getProperty(APPLE_CHARGES_KEY);
+  if (!raw) return [];
+  try { return JSON.parse(raw); } catch (e) { return []; }
+}
+
+function _registrarCargoAppleEsperado(total, fecha) {
+  var charges = _getAppleCharges();
+  charges.push({ total: total, fecha: fecha, ts: Date.now() });
+  if (charges.length > APPLE_CHARGES_MAX) charges = charges.slice(-APPLE_CHARGES_MAX);
+  PropertiesService.getScriptProperties().setProperty(APPLE_CHARGES_KEY, JSON.stringify(charges));
+}
+
+function _matcheaCargoAppleReciente(total) {
+  var charges = _getAppleCharges();
+  var tolerancia = 0.01; // centavos
+  var ventanaMs = 5 * 24 * 3600 * 1000; // 5 días
+  var ahora = Date.now();
+  for (var i = 0; i < charges.length; i++) {
+    if (Math.abs(charges[i].total - total) < tolerancia &&
+        (ahora - charges[i].ts) < ventanaMs) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Parser del email de recibo de Apple (subscripciones).
+ * Retorna { fecha, ultimos4, items: [{ nombre, monto }], total } o null.
+ * Cada item se registra por separado (una compra Apple = N movimientos).
+ */
+function parsearEmailAppleRecibo(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n');
+
+  // Detectar recibo Apple
+  if (!/Tu recibo de Apple|Recibo de Apple/i.test(text)) return null;
+
+  // Tarjeta: "Visa **** NNNN" (varias posibles representaciones del separador)
+  var mCard = text.match(/Visa\s*[\s•·\.\*\-]{2,}(\d{4})/i);
+  var ultimos4 = mCard ? mCard[1] : '';
+
+  // Fecha "Agosto 15, 2026" o similar (nombre completo del mes)
+  var fecha = null;
+  var mFecha = text.match(/([Ee]nero|[Ff]ebrero|[Mm]arzo|[Aa]bril|[Mm]ayo|[Jj]unio|[Jj]ulio|[Aa]gosto|[Ss]eptiembre|[Oo]ctubre|[Nn]oviembre|[Dd]iciembre)\s+(\d{1,2}),?\s*(\d{4})/);
+  if (mFecha) {
+    var mesNum = MESES_ES_LARGO[mFecha[1].toLowerCase()];
+    if (mesNum !== undefined) {
+      fecha = mFecha[3] + '-' + ('0' + (mesNum + 1)).slice(-2) + '-' + ('0' + parseInt(mFecha[2])).slice(-2);
+    }
+  }
+  if (!fecha && emailDate) {
+    fecha = Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  // Total: "Subtotal $NN.NN"
+  var mTotal = text.match(/Subtotal\s+\$\s*([\d,]+\.\d{2})/i);
+  var total = mTotal ? parseFloat(mTotal[1].replace(/,/g, '')) : 0;
+
+  // Extraer items: usamos "(mensual|anual|semanal)" como anchor.
+  // Estructura típica de cada item:
+  //   NOMBRE
+  //   PLAN (mensual|anual)
+  //   Se renovará el FECHA
+  //   $MONTO
+  // (líneas pueden estar en orden variable — buscamos $MONTO cercano al anchor)
+  var items = [];
+  var itemPattern = /([^\n$]+?)\s*(?:\n|\s)([^\n]*?\((?:mensual|anual|semanal)\)[^\n]*)/gi;
+  var match;
+  var seen = {};
+  while ((match = itemPattern.exec(text)) !== null) {
+    var nombre = match[1].trim().split('\n').pop().trim();
+    if (!nombre || nombre.length < 2 || nombre.length > 80) continue;
+    // buscar el $NN.NN más cercano después del match (dentro de 200 chars)
+    var restoTexto = text.substring(match.index, match.index + match[0].length + 200);
+    var mMonto = restoTexto.match(/\$\s*([\d,]+\.\d{2})/);
+    if (!mMonto) continue;
+    var monto = parseFloat(mMonto[1].replace(/,/g, ''));
+    if (!monto || monto <= 0) continue;
+    // Filtro: si el monto es igual al total (Subtotal aparece igual), skip para no duplicar
+    if (total > 0 && Math.abs(monto - total) < 0.005 && items.length === 0) continue;
+    // Dedup por nombre + monto
+    var key = nombre + '::' + monto;
+    if (seen[key]) continue;
+    seen[key] = true;
+    items.push({ nombre: nombre, monto: monto });
+  }
+
+  if (items.length === 0) return null;
+
+  return {
+    fecha: fecha,
+    ultimos4: ultimos4,
+    items: items,
+    total: total
+  };
+}
+
+/**
+ * Procesa un recibo Apple: registra cada item por separado.
+ * También guarda el total esperado para dedupear el cargo Chase APPLE.COM/BILL.
+ */
+function procesarAppleRecibo(parsed, emailId, threadUrl) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
+  var registrados = 0;
+  var pendientes = 0;
+  parsed.items.forEach(function(item) {
+    var pseudoParsed = {
+      fecha: parsed.fecha,
+      elementoRaw: item.nombre,
+      ultimos4: parsed.ultimos4,
+      monto: item.monto
+    };
+    var mapeoElem = buscarMapeoElemento(item.nombre);
+    if (!mapeoElem) {
+      agregarAPendientes(pseudoParsed, emailId + '-' + item.nombre, threadUrl,
+        'Apple sub sin mapeo: ' + item.nombre + ' (crea un elemento con este nombre)');
+      pendientes++;
+      return;
+    }
+    var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
+    var metodoPago = mapeoTarj ? ('Tarjeta ' + mapeoTarj.tipo) : 'Tarjeta Crédito';
+    var alias = mapeoTarj && mapeoTarj.alias ? mapeoTarj.alias : 'Apple';
+    registrarMovimiento({
+      fecha: parsed.fecha,
+      categoria: mapeoElem.categoria,
+      subcategoria: mapeoElem.subcategoria,
+      monto: item.monto,
+      descripcion: mapeoElem.elemento,
+      metodoPago: metodoPago,
+      notas: '[Auto Apple] ' + alias + ' ...' + parsed.ultimos4
+    });
+    registrados++;
+  });
+
+  // Registrar el total esperado para dedup con Chase APPLE.COM/BILL
+  if (parsed.total > 0) {
+    _registrarCargoAppleEsperado(parsed.total, parsed.fecha);
+  }
+
+  if (emailId) marcarEmailProcesado(emailId);
+  return { registrado: registrados > 0, registrados: registrados, pendientes: pendientes };
+}
+
 /**
  * Asegura que una subcategoría exista en Config. Si la crea, refresca el Dashboard.
  */
@@ -1486,6 +1639,12 @@ function intentarRegistrar(parsed, emailId, threadUrl) {
     return { registrado: false, yaProcesado: true };
   }
 
+  // Dedup: si es APPLE.COM/BILL y matchea un total de recibo Apple reciente, skip
+  if (/APPLE\.COM\/BILL/i.test(parsed.elementoRaw) && _matcheaCargoAppleReciente(parsed.monto)) {
+    if (emailId) marcarEmailProcesado(emailId);
+    return { registrado: false, yaProcesado: true };
+  }
+
   var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
   var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
 
@@ -1598,7 +1757,21 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 4) Parser Chase 4 Pagos - setup (agrega a la queue)
+        // 4) Parser recibo Apple (multi-item)
+        var appleRec = parsearEmailAppleRecibo(body, msg.getDate());
+        if (appleRec) {
+          var resA = procesarAppleRecibo(appleRec, msg.getId(), thread.getPermalink());
+          if (resA.yaProcesado) stats.ignorados++;
+          else {
+            stats.registrados += resA.registrados || 0;
+            stats.pendientes += resA.pendientes || 0;
+          }
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
+        // 5) Parser Chase 4 Pagos - setup (agrega a la queue)
         var setup4p = parsearEmailChase4PagosSetup(body);
         if (setup4p && setup4p.numeroPlan) {
           agregar4Pagos(setup4p, msg.getId(), msg.getDate());
@@ -1608,7 +1781,7 @@ function procesarEmailsBancarios() {
           return;
         }
 
-        // 5) Parser Chase 4 Pagos - recordatorio (silencioso)
+        // 6) Parser Chase 4 Pagos - recordatorio (silencioso)
         if (parsearEmailChase4PagosRecordatorio(body)) {
           stats.ignorados++;
           msg.markRead();
@@ -1791,6 +1964,20 @@ function testParserChaseDebito() {
 /**
  * Prueba el parser de transferencias de Chase.
  */
+function testParserAppleRecibo() {
+  var body = 'Tu recibo de Apple\n\n' +
+             'Recibo\n\n' +
+             'Agosto 15, 2026\n\n' +
+             'ID del pedido: MQ5SX48L8V\n\n' +
+             'Microsoft OneDrive\nMicrosoft 365 Personal (mensual)\nSe renovará el septiembre 11, 2026\n$9.99\n\n' +
+             'ChatGPT\nChatGPT Plus (mensual)\nSe renovará el septiembre 12, 2026\n$19.99\n\n' +
+             'Subtotal $29.98\n\n' +
+             'Visa **** 3634 $29.98';
+  var res = parsearEmailAppleRecibo(body, new Date());
+  Logger.log('Test parser Apple recibo: ' + JSON.stringify(res));
+  // Esperado: 2 items (Microsoft OneDrive $9.99, ChatGPT $19.99), total 29.98, ultimos4 3634
+}
+
 function testParserChaseDeposito() {
   var body = 'Depósito registrado\n\n' +
              'Tienes un depósito directo de $1,513.70\n\n' +
