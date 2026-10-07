@@ -2529,17 +2529,29 @@ function parsearEmailChase4PagosSetup(body) {
   if (!mMonto) return null;
   var montoTotal = parseFloat(mMonto[1].replace(/,/g, ''));
 
-  // Cuenta origen: "en tu cuenta de cheques (...NNNN)"
-  var mCuenta = text.match(/en tu cuenta de cheques\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  // Cuenta origen: "en tu cuenta de cheques (...NNNN)" (acepta "..." o "…")
+  var mCuenta = text.match(/en tu cuenta de cheques\s*\(\s*(?:\.{2,}|…|\*{2,})\s*(\d{4})\s*\)/i);
   var cuentaOrigen = mCuenta ? mCuenta[1] : '';
 
-  // Comercio: después de "POS DEBIT" hasta "(..." o salto
-  var mMerchant = text.match(/POS DEBIT\s+([A-Z0-9][A-Z0-9\s\.\-*&\/]+?)\s*(?:\(\s*\.{3}|\n)/i);
-  var comercio = mMerchant ? mMerchant[1].trim() : '';
+  // Comercio: "Descripción Pay in 4 Deposit - TMOBILE*AUTO PAY (...1249)"
+  // o formato viejo "POS DEBIT COMERCIO (...". Se quita el prefijo "Pay in 4 Deposit -".
+  var comercio = '';
+  var mDesc = text.match(/Descripci[óo]n\s+(.+?)\s*(?:\(\s*(?:\.{2,}|…|\*{2,})|\n)/i);
+  if (mDesc) {
+    comercio = mDesc[1].replace(/^Pay in 4 Deposit\s*-\s*/i, '').replace(/^POS DEBIT\s+/i, '').trim();
+  } else {
+    var mMerchant = text.match(/POS DEBIT\s+([A-Z0-9][A-Z0-9\s\.\-*&\/]+?)\s*(?:\(\s*(?:\.{2,}|…|\*{2,})|\n)/i);
+    if (mMerchant) comercio = mMerchant[1].trim();
+  }
 
-  // Número de plan
-  var mPlan = text.match(/N[úu]mero de plan\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  // Número de plan: "Número de plan (…1249)" / "Número plan (...1249)"
+  var mPlan = text.match(/N[úu]mero (?:de )?plan\s*\(\s*(?:\.{2,}|…|\*{2,})\s*(\d{4})\s*\)/i);
   var numeroPlan = mPlan ? mPlan[1] : '';
+  if (!numeroPlan) {
+    // Respaldo: el número entre paréntesis al final de la descripción
+    var mPlan2 = text.match(/Descripci[óo]n[^\n]*?\(\s*(?:\.{2,}|…|\*{2,})\s*(\d{4})\s*\)/i);
+    if (mPlan2) numeroPlan = mPlan2[1];
+  }
 
   // Cuota: "primer pago de $NN.NN"
   var mCuota = text.match(/primer pago de\s+\$\s*([\d,]+\.\d{2})/i);
@@ -2576,7 +2588,7 @@ function parsearEmailChase4PagosRecordatorio(body) {
   var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
   if (!/Tu pago de Chase 4 Pagos vence/i.test(text)) return null;
 
-  var mPlan = text.match(/Cuenta del plan\s*\(\s*\.{3}\s*(\d{4})\s*\)/i);
+  var mPlan = text.match(/Cuenta del plan\s*\(\s*(?:\.{2,}|…|\*{2,})\s*(\d{4})\s*\)/i);
   var mMonto = text.match(/Cantidad actual adeudada\s*\$\s*([\d,]+\.\d{2})/i);
 
   return {
