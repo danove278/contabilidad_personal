@@ -2871,6 +2871,37 @@ function _procesarCuotas4Pagos() {
   return registradas;
 }
 
+/**
+ * UNA SOLA VEZ: lee emails de 4 Pagos más antiguos que la ventana normal (7 días).
+ * Solo busca dentro del label Banco/Alertas y solo mensajes de 4 Pagos.
+ * Idempotente: un plan ya registrado no se duplica. Ejecutar desde el editor.
+ */
+function importarEmails4PagosAntiguos() {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch (e) { Logger.log('Lock ocupado, reintenta'); return; }
+  try {
+    var threads = GmailApp.search('label:' + GMAIL_QUERY.match(/label:(\S+)/)[1] + ' "4 Pagos" newer_than:90d', 0, 50);
+    var msgs = [];
+    threads.forEach(function(t) {
+      t.getMessages().forEach(function(m) { if (esRemitentePermitido(m.getFrom())) msgs.push(m); });
+    });
+    msgs.sort(function(a, b) { return a.getDate() - b.getDate(); });
+
+    var n = { setup: 0, liquidado: 0 };
+    msgs.forEach(function(m) {
+      var body = m.getPlainBody();
+      var s4 = parsearEmailChase4PagosSetup(body);
+      if (s4 && s4.numeroPlan) { agregar4Pagos(s4, m.getId(), m.getDate()); n.setup++; return; }
+      var l4 = parsearEmailChase4PagosLiquidado(body, m.getDate());
+      if (l4) { liquidar4Pagos(l4); n.liquidado++; }
+    });
+    var cuotas = _procesarCuotas4Pagos();
+    Logger.log('Importación 4 Pagos: ' + JSON.stringify(n) + ' | cuotas registradas: ' + cuotas);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /** Wrapper con lock para el trigger diario / ejecución manual. */
 function procesarCuotas4Pagos() {
   var lock = LockService.getScriptLock();
