@@ -1957,6 +1957,16 @@ function procesarEmailsBancarios() {
           return;
         }
 
+        // 8) Parser Chase 4 Pagos - plan liquidado
+        var liq4p = parsearEmailChase4PagosLiquidado(body, msg.getDate());
+        if (liq4p) {
+          liquidar4Pagos(liq4p);
+          stats.ignorados++;
+          msg.markRead();
+          procesoAlgunEnEsteThread = true;
+          return;
+        }
+
         // Ninguno matcheó — ignorar
         stats.ignorados++;
       });
@@ -2623,6 +2633,68 @@ function parsearEmailChase4PagosRecordatorio(body) {
     monto: mMonto ? parseFloat(mMonto[1].replace(/,/g, '')) : 0,
     fechaVencimiento: fecha
   };
+}
+
+/**
+ * Parser del email "Liquidaste tu plan" de Chase 4 Pagos.
+ * Retorna { numeroPlan, fecha (yyyy-MM-dd | '') } o null.
+ */
+function parsearEmailChase4PagosLiquidado(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+  if (!/Liquidaste tu plan/i.test(text) || !/se pag[óo] en su totalidad/i.test(text)) return null;
+
+  var mPlan = text.match(/\(\s*(?:\.{2,}|…|\*{2,})\s*(\d{4})\s*\)\s*se pag[óo]/i);
+  var fecha = '';
+  var mFecha = text.match(/en su totalidad en\s+([a-záéíóú]+)\.?\s+(\d{1,2}),?\s*(\d{4})/i);
+  if (mFecha) {
+    var nombre = mFecha[1].toLowerCase();
+    var mesNum = MESES_ES_LARGO[nombre];
+    if (mesNum === undefined) mesNum = MESES_ES_ABR[nombre];
+    if (mesNum !== undefined) {
+      fecha = mFecha[3] + '-' + ('0' + (mesNum + 1)).slice(-2) + '-' + ('0' + parseInt(mFecha[2], 10)).slice(-2);
+    }
+  }
+  if (!fecha && emailDate) fecha = _fmtFecha4P(emailDate);
+  return { numeroPlan: mPlan ? mPlan[1] : '', fecha: fecha };
+}
+
+/**
+ * Plan liquidado: si faltaban cuotas por registrar (liquidación anticipada),
+ * registra el saldo restante en una sola vez y marca el plan 'completado'.
+ * Debe llamarse con el lock de script ya adquirido.
+ */
+function liquidar4Pagos(liq) {
+  if (!liq.numeroPlan) return;
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHoja4Pagos(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var data = sheet.getRange(2, 1, lastRow - 1, HEADERS_4PAGOS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var f = data[i];
+    if (String(f[0]).trim() !== liq.numeroPlan || String(f[7]).trim() !== 'activo') continue;
+    var total = parseFloat(f[2]) || 0;
+    var cuota = parseFloat(f[5]) || (total / CUOTAS_4PAGOS);
+    var pagadas = parseInt(f[8], 10) || 0;
+    if (pagadas < CUOTAS_4PAGOS) {
+      var yaRegistrado = Math.min(pagadas, CUOTAS_4PAGOS) * cuota;
+      var restante = Math.round((total - yaRegistrado) * 100) / 100;
+      if (restante > 0.005) {
+        registrarMovimiento({
+          fecha: liq.fecha || _fmtFecha4P(new Date()),
+          categoria: String(f[10]).trim(),
+          subcategoria: String(f[11]).trim(),
+          monto: restante,
+          descripcion: String(f[12]).trim(),
+          metodoPago: 'Tarjeta Débito',
+          notas: '[Auto 4 Pagos] Liquidación anticipada plan ...' + liq.numeroPlan
+        });
+      }
+    }
+    sheet.getRange(i + 2, 9).setValue(CUOTAS_4PAGOS);
+    sheet.getRange(i + 2, 8).setValue('completado');
+    return;
+  }
 }
 
 function _fmtFecha4P(d) {
