@@ -1160,6 +1160,11 @@ function normalizarTexto(t) {
 function parsearEmailChase(body, emailDate) {
   var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
 
+  // Rechazar emails de 4 Pagos — los manejan sus propios parsers
+  if (/Configuraste un nuevo Chase 4 Pagos/i.test(text)) return null;
+  if (/Tu pago de Chase 4 Pagos\s*(?:SM)?\s+vence/i.test(text)) return null;
+  if (/Liquidaste tu plan/i.test(text) && /se pag[óo] en su totalidad/i.test(text)) return null;
+
   // Monto: primer $NNN.NN encontrado
   var mMonto = text.match(/\$\s*([\d,]+\.\d{2})/);
   if (!mMonto) return null;
