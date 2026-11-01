@@ -3707,7 +3707,8 @@ function obtenerMesesConDatos() {
  *         'Alquiler': {
  *           total: N,
  *           count: N,
- *           elementos: [ { nombre: 'X', plan: 'NNNN' | '', total: N, count: N }, ... ]
+ *           elementos: [ { nombre: 'X', plan: 'NNNN' | '', total: N, count: N,
+ *                          movs: [ { fecha: 'dd/MM', monto: N, detalle: '' }, ... ] }, ... ]
  *         }
  *       }
  *     }
@@ -3781,10 +3782,19 @@ function obtenerResumenMes(anio, mes) {
     var elem = descripcion || '(Sin descripción)';
     var elemKey = elem + (plan ? '|plan ' + plan : '');
     if (!subObj.elementos[elemKey]) {
-      subObj.elementos[elemKey] = { nombre: elem, plan: plan, total: 0, count: 0 };
+      subObj.elementos[elemKey] = { nombre: elem, plan: plan, total: 0, count: 0, movs: [] };
     }
     subObj.elementos[elemKey].total += monto;
     subObj.elementos[elemKey].count++;
+    // Detalle por movimiento (para desglosar con un clic cuando hay más de uno)
+    var notas = String(fila[7] || '').trim();
+    var mCuota = /Cuota (\d\/\d)/.exec(notas);
+    subObj.elementos[elemKey].movs.push({
+      ts: fechaMov.getTime(),
+      fecha: Utilities.formatDate(fechaMov, Session.getScriptTimeZone(), 'dd/MM'),
+      monto: monto,
+      detalle: mCuota ? 'Cuota ' + mCuota[1] : (notas && notas.indexOf('[Auto') !== 0 ? notas : '')
+    });
   });
 
   // Convertir elementos de objeto a array ordenado por total desc
@@ -3793,6 +3803,10 @@ function obtenerResumenMes(anio, mes) {
     Object.keys(subcats).forEach(function(sub) {
       var elemsArr = Object.keys(subcats[sub].elementos).map(function(k) {
         return subcats[sub].elementos[k];
+      });
+      elemsArr.forEach(function(el) {
+        el.movs.sort(function(x, y) { return x.ts - y.ts; });
+        el.movs.forEach(function(m) { delete m.ts; });
       });
       // El pago normal (sin plan) primero; luego los planes de 4 Pagos
       elemsArr.sort(function(a, b) {

@@ -548,6 +548,23 @@
     }
 
     .resumen-elemento-nombre { flex: 1; }
+    .resumen-elemento.clickable { cursor: pointer; }
+    .resumen-elemento .elem-chevron {
+      display: inline-block;
+      margin-right: 6px;
+      font-size: 9px;
+      transition: transform 0.15s;
+    }
+    .resumen-elemento-wrap.expanded .elem-chevron { transform: rotate(90deg); }
+    .resumen-movs { display: none; padding: 0 0 4px 16px; }
+    .resumen-elemento-wrap.expanded .resumen-movs { display: block; }
+    .resumen-mov {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+      font-size: 11px;
+      color: var(--text-light);
+    }
     .resumen-elemento-total { color: var(--text); font-weight: 500; }
 
     .resumen-empty {
@@ -3766,11 +3783,20 @@
         var elems = document.createElement('div');
         elems.className = 'resumen-elementos';
         subData.elementos.forEach(function(el) {
+          var ew = document.createElement('div');
+          ew.className = 'resumen-elemento-wrap';
           var e = document.createElement('div');
           e.className = 'resumen-elemento';
           var n = document.createElement('span');
           n.className = 'resumen-elemento-nombre';
-          n.textContent = el.nombre + (el.count > 1 ? ' × ' + el.count : '');
+          var puedeDesglosar = el.count > 1 && el.movs && el.movs.length > 1;
+          if (puedeDesglosar) {
+            var echev = document.createElement('span');
+            echev.className = 'elem-chevron';
+            echev.textContent = '▶';
+            n.appendChild(echev);
+          }
+          n.appendChild(document.createTextNode(el.nombre + (el.count > 1 ? ' × ' + el.count : '')));
           if (el.plan) {
             var badge = document.createElement('span');
             badge.className = 'resumen-elemento-plan';
@@ -3783,7 +3809,33 @@
           t.textContent = formatUSD(el.total);
           e.appendChild(n);
           e.appendChild(t);
-          elems.appendChild(e);
+          ew.appendChild(e);
+
+          if (puedeDesglosar) {
+            var elemKey = 'elem::' + cat + '::' + sub + '::' + el.nombre + '::' + (el.plan || '');
+            if (resumenExpandidos[elemKey]) ew.classList.add('expanded');
+            e.classList.add('clickable');
+            e.onclick = function(ev) {
+              ev.stopPropagation();
+              resumenExpandidos[elemKey] = !resumenExpandidos[elemKey];
+              ew.classList.toggle('expanded');
+            };
+            var movs = document.createElement('div');
+            movs.className = 'resumen-movs';
+            el.movs.forEach(function(m) {
+              var r = document.createElement('div');
+              r.className = 'resumen-mov';
+              var rf = document.createElement('span');
+              rf.textContent = m.fecha + (m.detalle ? ' · ' + m.detalle : '');
+              var rm = document.createElement('span');
+              rm.textContent = formatUSD(m.monto);
+              r.appendChild(rf);
+              r.appendChild(rm);
+              movs.appendChild(r);
+            });
+            ew.appendChild(movs);
+          }
+          elems.appendChild(ew);
         });
         wrap.appendChild(elems);
       }
