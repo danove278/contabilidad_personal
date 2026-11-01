@@ -98,6 +98,8 @@ Cuando Chase te manda un email de "Alerta de transacción", el script:
 
 El script se ejecuta cada 15 minutos vía trigger (activar con `crearTriggerEmails()` desde el editor). También puedes forzar la sincronización en cualquier momento desde la pestaña **Emails** del modal ⚙️.
 
+**Recibos de Chevron:** la alerta de Chase de la gasolina no trae el monto, por eso el gasto se registra desde el recibo que Chevron manda por email (ver v2.1). El recibo no incluye tarjeta, así que usa el método de pago por defecto.
+
 **Privacidad:** el script SOLO consulta emails con el label `Banco/Alertas`. Cualquier email fuera de ese label es invisible para el código (el query se ve en `Code.gs`, constante `GMAIL_QUERY`).
 
 ## Campos registrados
@@ -142,6 +144,7 @@ Para acceso rápido en móvil, agrega la URL a la pantalla de inicio (Safari/Chr
 
 ## Versiones
 
+- **v2.1** — **Recibos de Chevron (gasolina)**. Chase dejó de incluir el monto en la alerta, así que ahora el gasto se registra desde el email "Your Chevron receipt" (que Chevron envía desde su app). Extrae Total Sale, galones, precio por galón y producto, y los deja en Notas (`[Auto Chevron] ... | 12.250 gal REG @ $2.799`). Requiere un elemento `Chevron` en Elementos; si no existe, el email se reintenta solo cada 15 min (7 días) hasta que lo agregues. Si el recibo no trae tarjeta mapeada usa `CHEVRON_METODO_DEFAULT` (Tarjeta Crédito). Requiere filtro nuevo en Gmail: remitente de Chevron → aplicar label `Banco/Alertas`
 - **v1.14.0** — **Resumen como vista principal**. Al abrir la app ahora ves directamente el dashboard interactivo (mes actual con desglose por categoría/subcategoría/elemento). El formulario de registro manual pasa a ser un modal que se abre con el botón **➕** en el header. Se refresca automáticamente el resumen tras registrar un gasto
 - **v1.15.0** — **4 Pagos automático**. Al llegar el email de setup, la app registra el reembolso (+total, Ingresos › Reembolso 4 Pagos) y agenda 4 cuotas (cada 14 días) como gasto en la misma clasificación de la compra original. Las cuotas se registran solas al vencer; el email recordatorio ajusta la fecha real. Pestaña 4 Pagos pasa a mostrar avance (cuotas x/4) con opción de cancelar. Se corrigen parsers (símbolo … y 'PagosSM'). Opcional: ejecutar `crearTrigger4Pagos` (diario 6am)
 - **v1.15.1** — 4 Pagos: el email "Liquidaste tu plan" cierra el plan (estado completado). Si se liquidó antes de tiempo, registra el saldo restante en una sola vez para que el total cuadre

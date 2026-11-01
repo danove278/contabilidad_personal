@@ -111,7 +111,10 @@ var GMAIL_QUERY = 'label:Banco/Alertas -label:Banco/Procesado newer_than:7d';
 var LABEL_PROCESADO = 'Banco/Procesado';
 
 // Verificación defensiva del remitente real antes de parsear
-var REMITENTES_PERMITIDOS = ['chase.com', 'apple.com', 'google.com'];
+var REMITENTES_PERMITIDOS = ['chase.com', 'apple.com', 'google.com', 'chevron'];
+
+// Método de pago cuando el recibo de Chevron no trae tarjeta mapeada
+var CHEVRON_METODO_DEFAULT = 'Tarjeta Crédito';
 
 // Dedup: totales Apple recientes para saltar el cargo consolidado de Chase (APPLE.COM/BILL)
 var APPLE_CHARGES_KEY = 'APPLE_CHARGES';
@@ -1410,6 +1413,25 @@ function _matcheaCargoGoogleReciente(total) {
 }
 
 /**
+ * De "Microsoft OneDrive Microsoft 365 Personal" extrae "Microsoft OneDrive".
+ * Busca la primera repetición (o variante) de la primera palabra: todo lo
+ * anterior es el nombre del servicio.
+ */
+function _extraerNombreServicio(textoAntes) {
+  var words = textoAntes.split(/\s+/);
+  if (words.length <= 1) return textoAntes;
+  var first = words[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!first) return textoAntes;
+  for (var w = 1; w < words.length; w++) {
+    var wLower = words[w].toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (wLower && (wLower.indexOf(first) === 0 || first.indexOf(wLower) === 0)) {
+      return words.slice(0, w).join(' ');
+    }
+  }
+  return textoAntes;
+}
+
+/**
  * Parser del email de recibo de Apple (subscripciones).
  * Retorna { fecha, ultimos4, items: [{ nombre, monto }], total } o null.
  * Cada item se registra por separado (una compra Apple = N movimientos).
@@ -1441,29 +1463,52 @@ function parsearEmailAppleRecibo(body, emailDate) {
   var mTotal = text.match(/Subtotal\s+\$\s*([\d,]+\.\d{2})/i);
   var total = mTotal ? parseFloat(mTotal[1].replace(/,/g, '')) : 0;
 
-  // Extraer items: usamos "(mensual|anual|semanal)" como anchor.
-  // Estructura típica de cada item:
-  //   NOMBRE
-  //   PLAN (mensual|anual)
-  //   Se renovará el FECHA
-  //   $MONTO
-  // (líneas pueden estar en orden variable — buscamos $MONTO cercano al anchor)
+  // Extraer items: buscar líneas con (mensual|anual|semanal) como anchor.
+  // Soporta 2 formatos:
+  //   A) Tabla (Gmail API): "| | NOMBRE PLAN (mensual) ... | $MONTO |"
+  //   B) Línea a línea (getPlainBody): NOMBRE\nPLAN (mensual)\n...\n$MONTO
   var items = [];
-  var itemPattern = /([^\n$]+?)\s*(?:\n|\s)([^\n]*?\((?:mensual|anual|semanal)\)[^\n]*)/gi;
-  var match;
   var seen = {};
-  while ((match = itemPattern.exec(text)) !== null) {
-    var nombre = match[1].trim().split('\n').pop().trim();
-    if (!nombre || nombre.length < 2 || nombre.length > 80) continue;
-    // buscar el $NN.NN más cercano después del match (dentro de 200 chars)
-    var restoTexto = text.substring(match.index, match.index + match[0].length + 200);
-    var mMonto = restoTexto.match(/\$\s*([\d,]+\.\d{2})/);
-    if (!mMonto) continue;
-    var monto = parseFloat(mMonto[1].replace(/,/g, ''));
+  var lines = text.split('\n');
+  for (var l = 0; l < lines.length; l++) {
+    var line = lines[l];
+    if (!/\((?:mensual|anual|semanal)\)/i.test(line)) continue;
+
+    // Precio: en esta línea o las siguientes 3
+    var mPrecio = null;
+    for (var k = l; k < Math.min(l + 4, lines.length); k++) {
+      mPrecio = lines[k].match(/\$\s*([\d,]+\.\d{2})/);
+      if (mPrecio) break;
+    }
+    if (!mPrecio) continue;
+    var monto = parseFloat(mPrecio[1].replace(/,/g, ''));
     if (!monto || monto <= 0) continue;
-    // Filtro: si el monto es igual al total (Subtotal aparece igual), skip para no duplicar
-    if (total > 0 && Math.abs(monto - total) < 0.005 && items.length === 0) continue;
-    // Dedup por nombre + monto
+
+    var nombre;
+    var isTableRow = /^\s*\|/.test(line);
+    if (isTableRow) {
+      // Formato tabla: "| | NOMBRE PLAN (mensual) ... | $MONTO |"
+      var cleanLine = line.replace(/^\s*\|?\s*\|?\s*/, '').trim();
+      var textoAntes = cleanLine.split(/\s*\((?:mensual|anual|semanal)\)/i)[0].trim();
+      nombre = _extraerNombreServicio(textoAntes);
+    } else if (l > 0) {
+      // Formato línea a línea: nombre en la línea anterior
+      var prevLine = lines[l - 1].trim();
+      if (prevLine && prevLine.length >= 2 && prevLine.length < 80 &&
+          !/^[\|\#\-\=\s]*$/.test(prevLine) &&
+          !/^(Subtotal|Total|Visa|Se renovará|\d|Facturación|Recibo|Save )/i.test(prevLine)) {
+        nombre = prevLine;
+      } else {
+        var textoAntes2 = line.split(/\s*\((?:mensual|anual|semanal)\)/i)[0].trim();
+        nombre = _extraerNombreServicio(textoAntes2);
+      }
+    } else {
+      var textoAntes3 = line.split(/\s*\((?:mensual|anual|semanal)\)/i)[0].trim();
+      nombre = _extraerNombreServicio(textoAntes3);
+    }
+
+    if (!nombre || nombre.length < 2 || nombre.length > 80) continue;
+    if (/^(Subtotal|Total|Visa|Mastercard|Amex|Discover|Facturación|Se renovará)/i.test(nombre)) continue;
     var key = nombre + '::' + monto;
     if (seen[key]) continue;
     seen[key] = true;
@@ -1478,6 +1523,80 @@ function parsearEmailAppleRecibo(body, emailDate) {
     items: items,
     total: total
   };
+}
+
+/**
+ * Texto de un recibo para los parsers: el asunto ("Tu recibo de Apple",
+ * "El recibo de tu pedido de Google Play...") va primero porque el cuerpo
+ * no siempre repite esas frases. Con aHtml=true convierte getBody() a texto
+ * con una celda por línea (fallback cuando getPlainBody() no trae los items).
+ */
+function _textoRecibo(msg, aHtml) {
+  var cuerpo;
+  if (aHtml) {
+    cuerpo = msg.getBody()
+      .replace(/<(style|script)[\s\S]*?<\/\1>/gi, '')
+      .replace(/<\/(td|th|tr|p|div|h\d|li)>|<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+      .replace(/&#(\d+);/g, function(_, n) { return String.fromCharCode(n); })
+      .replace(/\n\s*\n+/g, '\n');
+  } else {
+    cuerpo = msg.getPlainBody();
+  }
+  return msg.getSubject() + '\n' + cuerpo;
+}
+
+function _diasEntre(fechaA, fechaB) {
+  var a = new Date(fechaA + 'T00:00:00');
+  var b = new Date(fechaB + 'T00:00:00');
+  return Math.abs(a - b) / (24 * 3600 * 1000);
+}
+
+/**
+ * Busca en Gmail el recibo de Apple que corresponde a un cargo consolidado
+ * de Chase (APPLE.COM/BILL). No depende del label Banco/Alertas.
+ * Matchea por total (±0.01) y fecha (±5 días). Prefiere recibos sin procesar.
+ * Retorna { parsed, emailId, threadUrl, yaProcesado } o null.
+ */
+function buscarReciboApple(monto, fecha) {
+  var threads = GmailApp.search(
+    'from:apple.com (subject:"recibo de Apple" OR subject:"receipt from Apple") newer_than:90d', 0, 50);
+  var yaProc = null;
+  for (var t = 0; t < threads.length; t++) {
+    var msgs = threads[t].getMessages();
+    for (var m = 0; m < msgs.length; m++) {
+      var msg = msgs[m];
+      if (!esRemitentePermitido(msg.getFrom())) continue;
+      var parsed = parsearEmailAppleRecibo(_textoRecibo(msg, false), msg.getDate()) ||
+                   parsearEmailAppleRecibo(_textoRecibo(msg, true), msg.getDate());
+      if (!parsed || Math.abs(parsed.total - monto) >= 0.01) continue;
+      if (fecha && parsed.fecha && _diasEntre(parsed.fecha, fecha) > 5) continue;
+      var r = { parsed: parsed, emailId: msg.getId(), threadUrl: threads[t].getPermalink() };
+      if (esEmailProcesado(r.emailId)) {
+        r.yaProcesado = true;
+        yaProc = yaProc || r;
+        continue;
+      }
+      return r;
+    }
+  }
+  return yaProc;
+}
+
+/**
+ * Resuelve un cargo APPLE.COM/BILL de Chase usando el recibo de Apple:
+ * registra cada servicio por separado (o los manda a Pendientes con
+ * "APPLE.COM - servicio" y su precio). Retorna el resultado de
+ * procesarAppleRecibo, { yaProcesado: true } si el recibo ya estaba
+ * registrado, o null si no hay recibo.
+ */
+function resolverCargoApple(monto, fecha, ultimos4) {
+  var r = buscarReciboApple(monto, fecha);
+  if (!r) return null;
+  if (r.yaProcesado) return { registrado: false, yaProcesado: true };
+  if (ultimos4) r.parsed.ultimos4 = ultimos4;
+  return procesarAppleRecibo(r.parsed, r.emailId, r.threadUrl);
 }
 
 /**
@@ -1500,8 +1619,11 @@ function procesarAppleRecibo(parsed, emailId, threadUrl) {
     };
     var mapeoElem = buscarMapeoElemento(item.nombre);
     if (!mapeoElem) {
+      // Raw descriptivo (apple.com + servicio); el monto va en su columna.
+      // Sigue mapeando: el elemento del catálogo (ej. "ChatGPT") está contenido en el raw.
+      pseudoParsed.elementoRaw = 'APPLE.COM - ' + item.nombre;
       agregarAPendientes(pseudoParsed, emailId + '-' + item.nombre, threadUrl,
-        'Apple sub sin mapeo: ' + item.nombre + ' (crea un elemento con este nombre)');
+        'Elemento no mapeado: APPLE.COM - ' + item.nombre + ' (crea un elemento con este nombre)');
       pendientes++;
       return;
     }
@@ -1582,8 +1704,8 @@ function parsearEmailGooglePlayRecibo(body, emailDate) {
     var monto = parseFloat(match[2].replace(/,/g, ''));
     if (!nombre || nombre.length < 2 || nombre.length > 120) continue;
     if (!monto || monto <= 0) continue;
-    // Skip líneas que son "Total", "Subtotal", "Impuesto"
-    if (/^(Total|Subtotal|Impuesto|Total del pedido)/i.test(nombre)) continue;
+    // Skip líneas que son totales, impuestos o fees
+    if (/^(Total|Subtotal|Impuesto|Total del pedido|CST|HST|GST|PST|QST|Sales Tax|State Tax|County Tax|City Tax|Local Tax|Tax\b|Fee\b)/i.test(nombre)) continue;
     var key = nombre + '::' + monto;
     if (seen[key]) continue;
     seen[key] = true;
@@ -1591,7 +1713,6 @@ function parsearEmailGooglePlayRecibo(body, emailDate) {
   }
 
   // Si no encontró items pero sí total, usar el total como single item con nombre genérico
-  // buscando "Artículo" cerca
   if (items.length === 0 && total > 0) {
     var mArt = text.match(/Se renovó tu suscripción a\s+([^\n]+?)\s+en Google Play/i);
     var nombreArt = mArt ? mArt[1].trim() : 'Google Play';
@@ -1600,12 +1721,63 @@ function parsearEmailGooglePlayRecibo(body, emailDate) {
 
   if (items.length === 0) return null;
 
+  // Impuestos incluidos: si el total (con tax) > suma de items, repartir la
+  // diferencia proporcionalmente para que la suma cuadre con el cargo de Chase.
+  var sumaItems = items.reduce(function(s, i) { return s + i.monto; }, 0);
+  if (total > 0 && total > sumaItems + 0.005) {
+    var diff = total - sumaItems;
+    items.forEach(function(it) {
+      it.monto = Math.round((it.monto + diff * (it.monto / sumaItems)) * 100) / 100;
+    });
+  }
+
   return {
     fecha: fecha,
     ultimos4: ultimos4,
     items: items,
     total: total || items.reduce(function(s, i) { return s + i.monto; }, 0)
   };
+}
+
+/**
+ * Busca en Gmail el recibo de Google Play que corresponde a un cargo
+ * consolidado de Chase (GOOGLE *X). Mismo criterio que buscarReciboApple.
+ */
+function buscarReciboGooglePlay(monto, fecha) {
+  var threads = GmailApp.search(
+    'from:google.com "Google Play" recibo newer_than:90d', 0, 50);
+  var yaProc = null;
+  for (var t = 0; t < threads.length; t++) {
+    var msgs = threads[t].getMessages();
+    for (var m = 0; m < msgs.length; m++) {
+      var msg = msgs[m];
+      if (!esRemitentePermitido(msg.getFrom())) continue;
+      var parsed = parsearEmailGooglePlayRecibo(_textoRecibo(msg, false), msg.getDate()) ||
+                   parsearEmailGooglePlayRecibo(_textoRecibo(msg, true), msg.getDate());
+      if (!parsed || Math.abs(parsed.total - monto) >= 0.01) continue;
+      if (fecha && parsed.fecha && _diasEntre(parsed.fecha, fecha) > 5) continue;
+      var r = { parsed: parsed, emailId: msg.getId(), threadUrl: threads[t].getPermalink() };
+      if (esEmailProcesado(r.emailId)) {
+        r.yaProcesado = true;
+        yaProc = yaProc || r;
+        continue;
+      }
+      return r;
+    }
+  }
+  return yaProc;
+}
+
+/**
+ * Resuelve un cargo GOOGLE de Chase con el recibo de Google Play
+ * (ver resolverCargoApple). Retorna null si no hay recibo.
+ */
+function resolverCargoGooglePlay(monto, fecha, ultimos4) {
+  var r = buscarReciboGooglePlay(monto, fecha);
+  if (!r) return null;
+  if (r.yaProcesado) return { registrado: false, yaProcesado: true };
+  if (ultimos4) r.parsed.ultimos4 = ultimos4;
+  return procesarGooglePlayRecibo(r.parsed, r.emailId, r.threadUrl);
 }
 
 /**
@@ -1627,8 +1799,9 @@ function procesarGooglePlayRecibo(parsed, emailId, threadUrl) {
     };
     var mapeoElem = buscarMapeoElemento(item.nombre);
     if (!mapeoElem) {
+      pseudoParsed.elementoRaw = 'GOOGLE PLAY - ' + item.nombre;
       agregarAPendientes(pseudoParsed, emailId + '-' + item.nombre, threadUrl,
-        'Google Play sub sin mapeo: ' + item.nombre + ' (crea un elemento con este nombre)');
+        'Elemento no mapeado: GOOGLE PLAY - ' + item.nombre + ' (crea un elemento con este nombre)');
       pendientes++;
       return;
     }
@@ -1653,6 +1826,78 @@ function procesarGooglePlayRecibo(parsed, emailId, threadUrl) {
 
   if (emailId) marcarEmailProcesado(emailId);
   return { registrado: registrados > 0, registrados: registrados, pendientes: pendientes };
+}
+
+/**
+ * Parser del email de recibo de Chevron ("Your Chevron receipt").
+ * Chase ya no manda el monto en la alerta, así que el recibo es la fuente del gasto.
+ * Retorna { fecha, monto, galones, precioGalon, producto, ultimos4 } o null.
+ */
+function parsearEmailChevronRecibo(body, emailDate) {
+  var text = String(body || '').replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ');
+
+  if (!/Your Chevron receipt/i.test(text) && !/Chevron/i.test(text)) return null;
+
+  var mTotal = text.match(/Total Sale\s*:?\s*\$?\s*([\d,]+\.\d{2})/i);
+  if (!mTotal) return null;
+  var monto = parseFloat(mTotal[1].replace(/,/g, ''));
+  if (!monto) return null;
+
+  var mGal = text.match(/Gallons\s*:?\s*([\d,]+\.?\d*)/i);
+  var mPrecio = text.match(/Price\s*\/\s*G(?:al)?\s*:?\s*\$?\s*([\d.]+)/i);
+  var mProd = text.match(/Product\s*:?\s*([A-Za-z0-9+ ]+?)(?:\n|Gallons|$)/i);
+  // Tarjeta (si el recibo la muestra): ****1234, xxxx1234 o ...1234
+  var mLast4 = text.match(/(?:\*{2,}|[xX]{2,}|\.{3})\s*(\d{4})\b/);
+
+  var fecha = emailDate
+    ? Utilities.formatDate(emailDate, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    : null;
+  if (!fecha) return null;
+
+  return {
+    fecha: fecha,
+    monto: monto,
+    galones: mGal ? parseFloat(mGal[1].replace(/,/g, '')) : 0,
+    precioGalon: mPrecio ? parseFloat(mPrecio[1]) : 0,
+    producto: mProd ? mProd[1].trim() : '',
+    ultimos4: mLast4 ? mLast4[1] : ''
+  };
+}
+
+/**
+ * Registra un recibo de Chevron como un movimiento. Si el elemento "Chevron"
+ * no existe en la hoja Elementos, NO marca el email como procesado: se
+ * reintenta solo en la próxima sincronización (query de 7 días).
+ */
+function procesarChevronRecibo(parsed, emailId) {
+  if (emailId && esEmailProcesado(emailId)) {
+    return { registrado: false, yaProcesado: true };
+  }
+
+  var mapeoElem = buscarMapeoElemento('CHEVRON');
+  if (!mapeoElem) return { registrado: false, pendiente: true };
+
+  var mapeoTarj = buscarMapeoTarjeta(parsed.ultimos4);
+  var metodoPago = mapeoTarj ? ('Tarjeta ' + mapeoTarj.tipo) : CHEVRON_METODO_DEFAULT;
+  var alias = mapeoTarj && mapeoTarj.alias ? mapeoTarj.alias : 'Chevron';
+
+  var detalle = [];
+  if (parsed.galones) detalle.push(parsed.galones.toFixed(3) + ' gal');
+  if (parsed.producto) detalle.push(parsed.producto);
+  if (parsed.precioGalon) detalle.push('@ $' + parsed.precioGalon.toFixed(3));
+
+  registrarMovimiento({
+    fecha: parsed.fecha,
+    categoria: mapeoElem.categoria,
+    subcategoria: mapeoElem.subcategoria,
+    monto: parsed.monto,
+    descripcion: mapeoElem.elemento,
+    metodoPago: metodoPago,
+    notas: '[Auto Chevron] ' + alias + (parsed.ultimos4 ? ' ...' + parsed.ultimos4 : '') +
+           (detalle.length ? ' | ' + detalle.join(' ') : '')
+  });
+  if (emailId) marcarEmailProcesado(emailId);
+  return { registrado: true };
 }
 
 /**
@@ -1793,10 +2038,26 @@ function intentarRegistrar(parsed, emailId, threadUrl) {
     if (emailId) marcarEmailProcesado(emailId);
     return { registrado: false, yaProcesado: true };
   }
+  // Sin recibo Apple procesado aún: buscarlo en Gmail y desglosar por servicio
+  if (/APPLE\.COM\/BILL/i.test(parsed.elementoRaw)) {
+    var resApple = resolverCargoApple(parsed.monto, parsed.fecha, parsed.ultimos4);
+    if (resApple) {
+      if (emailId) marcarEmailProcesado(emailId);
+      return resApple;
+    }
+  }
   // Dedup: si es GOOGLE *X y matchea un total de recibo Google Play reciente, skip
-  if (/^GOOGLE[\s\*]/i.test(parsed.elementoRaw) && _matcheaCargoGoogleReciente(parsed.monto)) {
+  if (/^GOOGLE\b/i.test(parsed.elementoRaw) && _matcheaCargoGoogleReciente(parsed.monto)) {
     if (emailId) marcarEmailProcesado(emailId);
     return { registrado: false, yaProcesado: true };
+  }
+  // Sin recibo Google Play procesado aún: buscarlo en Gmail y desglosar por servicio
+  if (/^GOOGLE\b/i.test(parsed.elementoRaw)) {
+    var resGoogle = resolverCargoGooglePlay(parsed.monto, parsed.fecha, parsed.ultimos4);
+    if (resGoogle) {
+      if (emailId) marcarEmailProcesado(emailId);
+      return resGoogle;
+    }
   }
 
   var mapeoElem = buscarMapeoElemento(parsed.elementoRaw);
@@ -1942,6 +2203,20 @@ function procesarEmailsBancarios() {
           return;
         }
 
+        // 5b) Parser recibo Chevron (gasolina)
+        var chevRec = parsearEmailChevronRecibo(body, msg.getDate());
+        if (chevRec) {
+          var resC = procesarChevronRecibo(chevRec, msg.getId());
+          if (resC.registrado) stats.registrados++;
+          else if (resC.yaProcesado) stats.ignorados++;
+          else stats.pendientes++;
+          if (resC.registrado || resC.yaProcesado) {
+            msg.markRead();
+            procesoAlgunEnEsteThread = true;
+          }
+          return;
+        }
+
         // 6) Parser Chase 4 Pagos - setup (agrega a la queue)
         var setup4p = parsearEmailChase4PagosSetup(body);
         if (setup4p && setup4p.numeroPlan) {
@@ -2028,13 +2303,72 @@ function procesarPendientes() {
         return;
       }
 
-      var mapeoElem = buscarMapeoElemento(elementoRaw);
-      var mapeoTarj = buscarMapeoTarjeta(ultimos4);
-      if (!mapeoElem || !mapeoTarj) return;
-
       var fechaStr = fecha instanceof Date
         ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
         : String(fecha);
+
+      // Cargo consolidado de Apple: desglosar con el recibo (servicio + precio)
+      if (/APPLE\.COM\/BILL/i.test(elementoRaw)) {
+        var resApple = resolverCargoApple(parseFloat(monto), fechaStr, ultimos4);
+        if (resApple) {
+          if (emailId) marcarEmailProcesado(emailId);
+          if (resApple.registrado) registrados += resApple.registrados || 1;
+          filasABorrar.push(i + 2);
+        }
+        return;
+      }
+
+      // Cargo consolidado de Google (raw de Chase, ej: "GOOGLE"): desglosar
+      if (/^GOOGLE\b/i.test(elementoRaw) && !/^GOOGLE PLAY - /i.test(elementoRaw)) {
+        var resGoogle = resolverCargoGooglePlay(parseFloat(monto), fechaStr, ultimos4);
+        if (resGoogle) {
+          if (emailId) marcarEmailProcesado(emailId);
+          if (resGoogle.registrado) registrados += resGoogle.registrados || 1;
+          filasABorrar.push(i + 2);
+          return;
+        }
+      }
+
+      // Limpieza: filas "GOOGLE PLAY - CST/Impuesto/Tax" del código anterior → borrar
+      if (/^GOOGLE PLAY - (CST|Impuesto|Tax|HST|GST|PST|Fee)\b/i.test(elementoRaw)) {
+        filasABorrar.push(i + 2);
+        return;
+      }
+
+      // Limpieza: filas "GOOGLE PLAY - servicio" con monto pre-tax del código anterior
+      // → actualizar monto al total con impuestos leyendo el recibo original
+      if (/^GOOGLE PLAY - /i.test(elementoRaw)) {
+        var baseEid = emailId.replace(/-[^-]+$/, '');
+        if (baseEid && baseEid !== emailId) {
+          try {
+            var receiptMsg = GmailApp.getMessageById(baseEid);
+            if (receiptMsg) {
+              var receiptParsed = parsearEmailGooglePlayRecibo(
+                _textoRecibo(receiptMsg, false), receiptMsg.getDate()) ||
+                parsearEmailGooglePlayRecibo(
+                  _textoRecibo(receiptMsg, true), receiptMsg.getDate());
+              if (receiptParsed) {
+                var itemNombre = elementoRaw.replace(/^GOOGLE PLAY - /i, '');
+                for (var j = 0; j < receiptParsed.items.length; j++) {
+                  if (receiptParsed.items[j].nombre === itemNombre &&
+                      Math.abs(receiptParsed.items[j].monto - parseFloat(monto)) > 0.005) {
+                    sheet.getRange(i + 2, 2).setValue(receiptParsed.items[j].monto);
+                    sheet.getRange(i + 2, 2).setNumberFormat('$#,##0.00');
+                    break;
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            Logger.log('Limpieza GP: no se pudo actualizar monto fila ' + (i+2) + ': ' + e.message);
+          }
+        }
+        // Cae al mapeo normal (abajo) — si hay elemento en catálogo, se registra
+      }
+
+      var mapeoElem = buscarMapeoElemento(elementoRaw);
+      var mapeoTarj = buscarMapeoTarjeta(ultimos4);
+      if (!mapeoElem || !mapeoTarj) return;
       var alias = mapeoTarj.alias || 'Chase';
 
       registrarMovimiento({
@@ -2059,6 +2393,87 @@ function procesarPendientes() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * DIAGNÓSTICO: corre desde el editor de Apps Script (Run > diagnosticoApple).
+ * Abre Ejecuciones (Executions) para ver el log completo.
+ */
+function diagnosticoApple() {
+  Logger.log('=== DIAGNÓSTICO APPLE ===');
+
+  // 1. ¿Se ve la función _extraerNombreServicio?
+  try {
+    var test = _extraerNombreServicio('iCloud iCloud+ con 200 GB');
+    Logger.log('1. _extraerNombreServicio OK: ' + test);
+  } catch (e) {
+    Logger.log('1. ERROR _extraerNombreServicio: ' + e.message);
+  }
+
+  // 2. Buscar recibos Apple en Gmail
+  var q = 'from:apple.com (subject:"recibo de Apple" OR subject:"receipt from Apple") newer_than:90d';
+  Logger.log('2. Query Gmail: ' + q);
+  var threads = GmailApp.search(q, 0, 50);
+  Logger.log('   Threads encontrados: ' + threads.length);
+
+  threads.forEach(function(thread, t) {
+    var msgs = thread.getMessages();
+    msgs.forEach(function(msg) {
+      var id = msg.getId();
+      var subj = msg.getSubject();
+      var from = msg.getFrom();
+      var permitido = esRemitentePermitido(from);
+      var procesado = esEmailProcesado(id);
+      Logger.log('   [' + t + '] id=' + id + ' subj="' + subj + '" from=' + from +
+                 ' permitido=' + permitido + ' yaProcesado=' + procesado);
+
+      // 3. Parsear con texto plano
+      var textoPlano = _textoRecibo(msg, false);
+      var parsed = parsearEmailAppleRecibo(textoPlano, msg.getDate());
+      Logger.log('   plainText parse: ' + (parsed ? JSON.stringify({
+        items: parsed.items.length,
+        total: parsed.total,
+        nombres: parsed.items.map(function(i) { return i.nombre + '=$' + i.monto; }).join(', ')
+      }) : 'NULL'));
+
+      // 4. Parsear con HTML fallback
+      if (!parsed) {
+        var textoHtml = _textoRecibo(msg, true);
+        parsed = parsearEmailAppleRecibo(textoHtml, msg.getDate());
+        Logger.log('   htmlFallback parse: ' + (parsed ? JSON.stringify({
+          items: parsed.items.length,
+          total: parsed.total,
+          nombres: parsed.items.map(function(i) { return i.nombre + '=$' + i.monto; }).join(', ')
+        }) : 'NULL'));
+      }
+    });
+  });
+
+  // 5. Leer Pendientes y probar resolución
+  Logger.log('');
+  Logger.log('=== PENDIENTES APPLE.COM/BILL ===');
+  var ss = SpreadsheetApp.openById(getSpreadsheetId());
+  var sheet = obtenerHojaPendientes(ss);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('No hay pendientes'); return; }
+  var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  data.forEach(function(fila, i) {
+    var elem = String(fila[2] || '').trim();
+    if (!/APPLE\.COM\/BILL/i.test(elem)) return;
+    var fecha = fila[0];
+    var monto = fila[1];
+    var u4 = String(fila[3] || '').trim();
+    var eid = String(fila[5] || '').trim();
+    var fechaStr = fecha instanceof Date
+      ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(fecha);
+    Logger.log('Fila ' + (i+2) + ': ' + elem + ' $' + monto + ' fecha=' + fechaStr +
+               ' u4=' + u4 + ' eid=' + eid + ' yaProcesado=' + esEmailProcesado(eid));
+    var res = resolverCargoApple(parseFloat(monto), fechaStr, u4);
+    Logger.log('  resolverCargoApple -> ' + JSON.stringify(res));
+  });
+
+  Logger.log('=== FIN DIAGNÓSTICO ===');
 }
 
 /**
