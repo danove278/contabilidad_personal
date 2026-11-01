@@ -518,6 +518,15 @@
       display: block;
     }
 
+    .resumen-elemento-plan {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 11px;
+      background: #eef2fb;
+      color: #3b5bdb;
+    }
     .resumen-sub .sub-chevron {
       display: inline-block;
       margin-right: 6px;
@@ -3762,6 +3771,13 @@
           var n = document.createElement('span');
           n.className = 'resumen-elemento-nombre';
           n.textContent = el.nombre + (el.count > 1 ? ' × ' + el.count : '');
+          if (el.plan) {
+            var badge = document.createElement('span');
+            badge.className = 'resumen-elemento-plan';
+            badge.textContent = '4 Pagos · plan ...' + el.plan;
+            n.appendChild(document.createTextNode(' '));
+            n.appendChild(badge);
+          }
           var t = document.createElement('span');
           t.className = 'resumen-elemento-total';
           t.textContent = formatUSD(el.total);

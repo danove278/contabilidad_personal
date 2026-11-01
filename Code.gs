@@ -3707,7 +3707,7 @@ function obtenerMesesConDatos() {
  *         'Alquiler': {
  *           total: N,
  *           count: N,
- *           elementos: [ { nombre: 'X', total: N, count: N }, ... ]
+ *           elementos: [ { nombre: 'X', plan: 'NNNN' | '', total: N, count: N }, ... ]
  *         }
  *       }
  *     }
@@ -3756,6 +3756,9 @@ function obtenerResumenMes(anio, mes) {
     var subcategoria = String(fila[3]).trim();
     var monto = parseFloat(fila[4]) || 0;
     var descripcion = String(fila[5]).trim();
+    // Cuotas de 4 Pagos: la nota trae '[Auto 4 Pagos] ... plan ...NNNN'
+    var mPlan = /\[Auto 4 Pagos\].*?plan \.\.\.(\w+)/.exec(String(fila[7] || ''));
+    var plan = mPlan ? mPlan[1] : '';
 
     if (!categoria || CATEGORIAS.indexOf(categoria) === -1) return;
 
@@ -3776,11 +3779,12 @@ function obtenerResumenMes(anio, mes) {
 
     // Agrupar por descripción (elemento)
     var elem = descripcion || '(Sin descripción)';
-    if (!subObj.elementos[elem]) {
-      subObj.elementos[elem] = { nombre: elem, total: 0, count: 0 };
+    var elemKey = elem + (plan ? '|plan ' + plan : '');
+    if (!subObj.elementos[elemKey]) {
+      subObj.elementos[elemKey] = { nombre: elem, plan: plan, total: 0, count: 0 };
     }
-    subObj.elementos[elem].total += monto;
-    subObj.elementos[elem].count++;
+    subObj.elementos[elemKey].total += monto;
+    subObj.elementos[elemKey].count++;
   });
 
   // Convertir elementos de objeto a array ordenado por total desc
@@ -3790,7 +3794,11 @@ function obtenerResumenMes(anio, mes) {
       var elemsArr = Object.keys(subcats[sub].elementos).map(function(k) {
         return subcats[sub].elementos[k];
       });
-      elemsArr.sort(function(a, b) { return b.total - a.total; });
+      // El pago normal (sin plan) primero; luego los planes de 4 Pagos
+      elemsArr.sort(function(a, b) {
+        if (!!a.plan !== !!b.plan) return a.plan ? 1 : -1;
+        return b.total - a.total;
+      });
       subcats[sub].elementos = elemsArr;
     });
   });
